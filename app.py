@@ -111,13 +111,7 @@ drugs_processed = apply_drug_rules(drugs_df, seishoku_master)
 # ナビ判定（ヘッダー + 臨工記事）
 navi_result = apply_navi_rules(header_df, kiji_df)
 
-# ===== デバッグ用（確認後に削除） =====
-st.write("■ header_dfの列一覧:", list(header_df.columns))
-flower = header_df[header_df["患者ID"] == 10000001]
-if not flower.empty:
-    st.write("■ テスト花子の申込使用機器:", flower["申込使用機器"].values)
-st.write("■ navi_result:", navi_result)
-# ===== デバッグここまで =====
+
 
 
 # =============================================================================
