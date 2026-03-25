@@ -33,7 +33,7 @@ def render_patient_list(header_df: pd.DataFrame, navi_df: pd.DataFrame | None = 
     患者一覧画面を描画する。
 
     表示内容:
-      - テーブル形式で患者一覧（患者ID, 氏名, 手術日, 診療科, 術式, ステータス）
+      - テーブル形式で患者一覧（患者ID, 氏名, 手術日, 診療科, 術式, ナビ対象, 算定ステータス）
       - ステータスに応じたカラーバッジ
       - 患者を選択すると算定明細画面に遷移
 
@@ -87,6 +87,24 @@ def render_patient_list(header_df: pd.DataFrame, navi_df: pd.DataFrame | None = 
 
     st.divider()
 
+    # --- 列見出し（データ行と同じカラム比率） ---
+    _col_weights = [1, 2, 1.5, 1.5, 3, 1.2, 1.5, 1]
+    _header_labels = [
+        "患者ID",
+        "氏名",
+        "手術日",
+        "診療科",
+        "術式",
+        "ナビ対象",
+        "算定ステータス",
+        "操作",
+    ]
+
+    if display_data:
+        hdr = st.columns(_col_weights)
+        for idx, text in enumerate(_header_labels):
+            hdr[idx].markdown(f"**{text}**")
+
     # --- 各患者を行として表示 ---
     for i, data in enumerate(display_data):
         patient_id = data["患者ID"]
@@ -96,7 +114,7 @@ def render_patient_list(header_df: pd.DataFrame, navi_df: pd.DataFrame | None = 
         navi_badge = NAVI_BADGE.get(data.get("ナビ", "判定不可"), data.get("ナビ", "判定不可"))
 
         # 各患者を1行として表示
-        cols = st.columns([1, 2, 1.5, 1.5, 3, 1.2, 1.5, 1])
+        cols = st.columns(_col_weights)
         cols[0].write(str(patient_id))
         cols[1].write(data["患者氏名"])
         cols[2].write(surgery_date)
@@ -112,6 +130,8 @@ def render_patient_list(header_df: pd.DataFrame, navi_df: pd.DataFrame | None = 
             st.session_state["current_page"] = "算定明細"
             st.rerun()
 
-    # ヘッダー行をテーブル上部に表示
     if display_data:
-        st.caption("※ 患者行の「詳細」ボタンをクリックすると算定明細画面に移動します")
+        st.caption(
+            "「ナビ対象」の **非対象** は「非対称」ではなく、ナビルール上の算定対象外を意味します。"
+            " 「詳細」で算定明細画面に移動します。"
+        )

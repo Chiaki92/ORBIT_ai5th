@@ -21,6 +21,125 @@ from state_manager import (
 )
 
 
+def _build_detail_patient_options(header_df: pd.DataFrame) -> tuple[list[str], dict[str, tuple], dict[tuple, str]]:
+    """
+    算定明細用の患者選択肢を構築する。
+
+    戻り値:
+      (all_labels, label_to_tuple, tuple_to_label)
+      - all_labels: selectbox 用ラベル列（先頭はプレースホルダ）
+      - label_to_tuple: ラベル → (患者ID or None, 手術日 or None)
+      - tuple_to_label: (患者ID, 手術日) → ラベル（未選択は (None, None)）
+    """
+    placeholder = "（患者を選択）"
+    rows: list[tuple[int, object, str]] = []
+    for _, row in header_df.iterrows():
+        pid = int(row["患者ID"])
+        sdate = row["手術日"]
+        name = row["患者氏名"] if pd.notna(row["患者氏名"]) else ""
+        lbl = f"{pid} / {name} / {sdate}"
+        rows.append((pid, sdate, lbl))
+
+    label_to_tuple: dict[str, tuple] = {placeholder: (None, None)}
+    tuple_to_label: dict[tuple, str] = {(None, None): placeholder}
+    for pid, sdate, lbl in rows:
+        label_to_tuple[lbl] = (pid, sdate)
+        tuple_to_label[(pid, sdate)] = lbl
+
+    all_labels = [placeholder] + [r[2] for r in rows]
+    return all_labels, label_to_tuple, tuple_to_label
+
+
+def _ordered_kubun_labels(rows: list) -> list[str]:
+    """
+    算定項目をタブ表示する際の区分ラベル順を返す。
+    定義済み区分を優先し、その後データ出現順で未知の区分を付与する。
+    """
+    if not rows:
+        return []
+    preferred = ["麻酔", "検査", "薬剤", "薬剤（術後鎮痛）", "★項目", "ナビ"]
+    ordered: list[str] = [k for k in preferred if any(r.get("区分") == k for r in rows)]
+    for r in rows:
+        k = r.get("区分") or "（未分類）"
+        if k not in ordered:
+            ordered.append(k)
+    return ordered
+
+
+def _indices_by_kubun(box2: list) -> dict[str, list[int]]:
+    """区分ごとの元リスト上の行インデックス（ウィジェット key 整合用）。"""
+    out: dict[str, list[int]] = {}
+    for i, row in enumerate(box2):
+        k = row.get("区分") or "（未分類）"
+        out.setdefault(k, []).append(i)
+    return out
+
+
+def _render_santei_row(i: int, row: dict) -> None:
+    """算定項目の1行を描画し、row をその場で更新する。"""
+    row_state = row["状態"]
+
+    if row_state == "削除":
+        cols = st.columns([1, 3, 1.5, 1.5, 1, 1.5])
+        cols[0].markdown(f"~~{row['区分']}~~")
+        cols[1].markdown(f"~~{row['項目名']}~~")
+        cols[2].markdown(f"~~{row['システム値']}~~")
+        cols[3].markdown(f"~~{row['現在値']}~~")
+        cols[4].markdown(f"~~{row['単位']}~~")
+        if cols[5].button("元に戻す", key=f"restore_{i}"):
+            row["状態"] = "未変更"
+            row["現在値"] = row["システム値"]
+        return
+
+    cols = st.columns([1, 3, 1.5, 1.5, 1, 1.5])
+    cols[0].write(row["区分"])
+    cols[1].write(row["項目名"])
+    cols[2].write(row["システム値"])
+
+    if row["区分"] == "ナビ":
+        new_value = cols[3].selectbox(
+            "現在値",
+            options=["対象", "非対象", "判定不可"],
+            index=["対象", "非対象", "判定不可"].index(str(row["現在値"])) if str(row["現在値"]) in ["対象", "非対象", "判定不可"] else 2,
+            key=f"val_{i}",
+            label_visibility="collapsed",
+        )
+    else:
+        new_value = cols[3].text_input(
+            "現在値",
+            value=str(row["現在値"]),
+            key=f"val_{i}",
+            label_visibility="collapsed",
+        )
+
+    cols[4].write(row["単位"])
+
+    if str(new_value) != str(row["システム値"]):
+        row["現在値"] = new_value
+        if row["状態"] != "追加":
+            row["状態"] = "修正済み"
+    else:
+        row["現在値"] = new_value
+        if row["状態"] == "修正済み":
+            row["状態"] = "未変更"
+
+    if row_state == "修正済み":
+        if cols[5].button("元に戻す", key=f"revert_{i}"):
+            row["現在値"] = row["システム値"]
+            row["状態"] = "未変更"
+    elif row_state == "追加":
+        if cols[5].button("削除", key=f"del_added_{i}"):
+            row["状態"] = "削除"
+    else:
+        if cols[5].button("削除", key=f"del_{i}"):
+            row["状態"] = "削除"
+
+    if row_state == "修正済み":
+        cols[5].caption("✏️ 変更")
+    elif row_state == "追加":
+        cols[5].caption("🆕 追加")
+
+
 def _get_masui_start_time(masui_df: pd.DataFrame, patient_id: int) -> str:
     """
     麻酔開始時間を取得する。
@@ -62,12 +181,66 @@ def render_detail(
       kensa_df: apply_kensa_rules() の出力
       drugs_df: apply_drug_rules() の出力
     """
-    # --- 選択患者の確認 ---
+    st.subheader("算定明細")
+
+    if header_df is None or header_df.empty:
+        st.warning("患者データがありません。アップロード画面でデータを取り込んでください。")
+        return
+
+    all_labels, label_to_tuple, tuple_to_label = _build_detail_patient_options(header_df)
+    _applied_key = "_detail_last_applied_tuple"
+    select_key = "detail_patient_select"
+
     patient_id = st.session_state.get("selected_patient_id")
     surgery_date = st.session_state.get("selected_surgery_date")
+    sess_tuple = (patient_id, surgery_date)
+
+    # 患者一覧など別画面で session が変わったときだけウィジェットを同期する
+    if st.session_state.get(_applied_key) != sess_tuple:
+        if "detail_pending_switch" in st.session_state:
+            del st.session_state["detail_pending_switch"]
+        st.session_state[select_key] = tuple_to_label.get(sess_tuple, all_labels[0])
+        st.session_state[_applied_key] = sess_tuple
+
+    pending = st.session_state.get("detail_pending_switch")
+    if pending:
+        st.warning("未保存の変更があります。別の患者に切り替えますか？")
+        pc1, pc2 = st.columns(2)
+        if pc1.button("保存せずに切り替え", key="detail_force_patient_switch"):
+            new_pid, new_date = pending
+            st.session_state["selected_patient_id"] = new_pid
+            st.session_state["selected_surgery_date"] = new_date
+            st.session_state[select_key] = tuple_to_label[(new_pid, new_date)]
+            st.session_state[_applied_key] = (new_pid, new_date)
+            del st.session_state["detail_pending_switch"]
+            st.rerun()
+        if pc2.button("キャンセル", key="detail_cancel_patient_switch"):
+            del st.session_state["detail_pending_switch"]
+            st.rerun()
+
+    st.selectbox("表示する患者", options=all_labels, key=select_key)
+    chosen_label = st.session_state[select_key]
+    chosen_tuple = label_to_tuple[chosen_label]
+
+    if chosen_tuple != sess_tuple:
+        new_pid, new_date = chosen_tuple
+        if new_pid is None:
+            st.session_state["selected_patient_id"] = None
+            st.session_state["selected_surgery_date"] = None
+            st.session_state[_applied_key] = (None, None)
+            st.info("上のリストから患者を選択すると算定明細を表示します。")
+            return
+        if patient_id is not None and has_unsaved_changes(patient_id):
+            st.session_state[select_key] = tuple_to_label.get(sess_tuple, all_labels[0])
+            st.session_state["detail_pending_switch"] = (new_pid, new_date)
+            st.rerun()
+        st.session_state["selected_patient_id"] = new_pid
+        st.session_state["selected_surgery_date"] = new_date
+        st.session_state[_applied_key] = (new_pid, new_date)
+        st.rerun()
 
     if patient_id is None:
-        st.info("患者一覧画面で患者を選択してください。")
+        st.info("上のリストから患者を選択すると算定明細を表示します。")
         return
 
     # --- 「一覧に戻る」ボタン ---
@@ -163,100 +336,33 @@ def render_detail(
         </script>
         """, height=0)
 
-    # --- 算定テーブルの表示・編集 ---
+    # --- 算定テーブルの表示・編集（区分ごとにタブ） ---
     st.subheader("算定項目")
+    st.caption("区分ごとにタブを切り替えて確認・編集できます。")
 
-    # テーブルヘッダー
-    header_cols = st.columns([1, 3, 1.5, 1.5, 1, 1.5])
-    header_cols[0].markdown("**区分**")
-    header_cols[1].markdown("**項目名**")
-    header_cols[2].markdown("**システム値**")
-    header_cols[3].markdown("**現在値**")
-    header_cols[4].markdown("**単位**")
-    header_cols[5].markdown("**操作**")
+    def _render_santei_table_header() -> None:
+        header_cols = st.columns([1, 3, 1.5, 1.5, 1, 1.5])
+        header_cols[0].markdown("**区分**")
+        header_cols[1].markdown("**項目名**")
+        header_cols[2].markdown("**システム値**")
+        header_cols[3].markdown("**現在値**")
+        header_cols[4].markdown("**単位**")
+        header_cols[5].markdown("**操作**")
 
-    st.divider()
+    if not box2:
+        st.info("算定項目がありません。")
+    else:
+        kubun_order = _ordered_kubun_labels(box2)
+        by_kubun = _indices_by_kubun(box2)
+        tab_list = st.tabs(kubun_order)
+        for tab_panel, kubun in zip(tab_list, kubun_order):
+            with tab_panel:
+                _render_santei_table_header()
+                st.divider()
+                for i in by_kubun.get(kubun, []):
+                    _render_santei_row(i, box2[i])
 
-    # 各行を表示
-    updated_rows = []
-    for i, row in enumerate(box2):
-        row_state = row["状態"]
-
-        # 削除された行は取り消し線で表示
-        if row_state == "削除":
-            cols = st.columns([1, 3, 1.5, 1.5, 1, 1.5])
-            cols[0].markdown(f"~~{row['区分']}~~")
-            cols[1].markdown(f"~~{row['項目名']}~~")
-            cols[2].markdown(f"~~{row['システム値']}~~")
-            cols[3].markdown(f"~~{row['現在値']}~~")
-            cols[4].markdown(f"~~{row['単位']}~~")
-            # 「元に戻す」ボタン
-            if cols[5].button("元に戻す", key=f"restore_{i}"):
-                row["状態"] = "未変更"
-                row["現在値"] = row["システム値"]
-            updated_rows.append(row)
-            continue
-
-        # 通常の行表示
-        cols = st.columns([1, 3, 1.5, 1.5, 1, 1.5])
-        cols[0].write(row["区分"])
-        cols[1].write(row["項目名"])
-        cols[2].write(row["システム値"])
-
-        # 現在値を編集可能にする
-        if row["区分"] == "ナビ":
-            new_value = cols[3].selectbox(
-                "現在値",
-                options=["対象", "非対象", "判定不可"],
-                index=["対象", "非対象", "判定不可"].index(str(row["現在値"])) if str(row["現在値"]) in ["対象", "非対象", "判定不可"] else 2,
-                key=f"val_{i}",
-                label_visibility="collapsed",
-            )
-        else:
-            new_value = cols[3].text_input(
-                "現在値",
-                value=str(row["現在値"]),
-                key=f"val_{i}",
-                label_visibility="collapsed",
-            )
-
-        cols[4].write(row["単位"])
-
-        # 値が変わったら状態を「修正済み」に更新
-        if str(new_value) != str(row["システム値"]):
-            row["現在値"] = new_value
-            if row["状態"] != "追加":  # 追加行は状態を変えない
-                row["状態"] = "修正済み"
-        else:
-            row["現在値"] = new_value
-            if row["状態"] == "修正済み":
-                row["状態"] = "未変更"
-
-        # 操作ボタン
-        if row_state == "修正済み":
-            # 変更済み → 「元に戻す」ボタンを表示
-            if cols[5].button("元に戻す", key=f"revert_{i}"):
-                row["現在値"] = row["システム値"]
-                row["状態"] = "未変更"
-        elif row_state == "追加":
-            # 追加行 → 「削除」ボタンを表示
-            if cols[5].button("削除", key=f"del_added_{i}"):
-                row["状態"] = "削除"
-        else:
-            # 未変更 → 「削除」ボタンを表示
-            if cols[5].button("削除", key=f"del_{i}"):
-                row["状態"] = "削除"
-
-        # 修正済みの行は背景色で強調（CSSでの対応が難しいので、ラベルで表示）
-        if row_state == "修正済み":
-            cols[5].caption("✏️ 変更")
-        elif row_state == "追加":
-            cols[5].caption("🆕 追加")
-
-        updated_rows.append(row)
-
-    # 箱2を更新
-    update_box2(patient_id, updated_rows)
+    update_box2(patient_id, list(box2))
 
     st.divider()
 
