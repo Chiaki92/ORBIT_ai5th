@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from state_manager import get_patient_status
+from views.ui_helpers import zebra_row_container
 
 
 # =============================================================================
@@ -113,25 +114,23 @@ def render_patient_list(header_df: pd.DataFrame, navi_df: pd.DataFrame | None = 
         badge_html = STATUS_BADGE.get(status, status)
         navi_badge = NAVI_BADGE.get(data.get("ナビ", "判定不可"), data.get("ナビ", "判定不可"))
 
-        # 各患者を1行として表示
-        cols = st.columns(_col_weights)
-        cols[0].write(str(patient_id))
-        cols[1].write(data["患者氏名"])
-        cols[2].write(surgery_date)
-        cols[3].write(data["診療科"])
-        cols[4].write(data["術式"])
-        cols[5].markdown(navi_badge, unsafe_allow_html=True)
-        cols[6].markdown(badge_html, unsafe_allow_html=True)
+        # 各患者を1行として表示（key 付き container で行背景を付与）
+        with zebra_row_container(i, f"orbit_pl_{patient_id}_{i}"):
+            cols = st.columns(_col_weights)
+            cols[0].write(str(patient_id))
+            cols[1].write(data["患者氏名"])
+            cols[2].write(surgery_date)
+            cols[3].write(data["診療科"])
+            cols[4].write(data["術式"])
+            cols[5].markdown(navi_badge, unsafe_allow_html=True)
+            cols[6].markdown(badge_html, unsafe_allow_html=True)
 
-        # 「詳細」ボタン → 算定明細画面に遷移
-        if cols[7].button("詳細", key=f"detail_{i}"):
-            st.session_state["selected_patient_id"] = patient_id
-            st.session_state["selected_surgery_date"] = surgery_date
-            st.session_state["current_page"] = "算定明細"
-            st.rerun()
+            # 「詳細」ボタン → 算定明細画面に遷移
+            if cols[7].button("詳細", key=f"detail_{i}"):
+                st.session_state["selected_patient_id"] = patient_id
+                st.session_state["selected_surgery_date"] = surgery_date
+                st.session_state["current_page"] = "算定明細"
+                st.rerun()
 
     if display_data:
-        st.caption(
-            "「ナビ対象」の **非対象** は「非対称」ではなく、ナビルール上の算定対象外を意味します。"
-            " 「詳細」で算定明細画面に移動します。"
-        )
+        st.caption("「詳細」で算定明細画面に移動します。")

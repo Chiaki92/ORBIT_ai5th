@@ -17,6 +17,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from rules.masui_rules import masui_segments_by_code
+
 # =============================================================================
 # ファイルパスの設定
 # =============================================================================
@@ -68,6 +70,7 @@ def build_box1(
     star_items_df: pd.DataFrame | None = None,
     navi_df: pd.DataFrame | None = None,
     surgery_date: str | None = None,
+    masui_time_raw_df: pd.DataFrame | None = None,
 ) -> list:
     """
     ルール適用後のデータを統一フォーマット（箱1）に変換する。
@@ -94,15 +97,31 @@ def build_box1(
 
     # --- 麻酔データ ---
     patient_masui = masui_df[masui_df["患者ID"] == patient_id]
+    if surgery_date is not None and "手術日" in patient_masui.columns:
+        patient_masui = patient_masui[
+            patient_masui["手術日"].astype(str) == str(surgery_date)
+        ]
+
+    masui_segments = (
+        masui_segments_by_code(masui_time_raw_df, patient_id, surgery_date)
+        if masui_time_raw_df is not None
+        else {}
+    )
+
     for _, row in patient_masui.iterrows():
-        rows.append({
+        code = str(row["コード"])
+        seg_list = masui_segments.get(code, [])
+        masui_row = {
             "row_id": f"masui_{counter:03d}",
             "区分": "麻酔",
             "項目名": row["名称"],
-            "コード": str(row["コード"]),
+            "コード": code,
             "数量": str(row["合計時間"]),
             "単位": "時間",
-        })
+        }
+        if seg_list:
+            masui_row["麻酔時間内訳"] = seg_list
+        rows.append(masui_row)
         counter += 1
 
     # --- 検査データ ---
@@ -226,6 +245,7 @@ def init_box2(patient_id: int, box1_rows: list):
         box2_row = row.copy()
         box2_row["システム値"] = row["数量"]   # 箱1の値をそのままコピー
         box2_row["現在値"] = row["数量"]       # 初期状態ではシステム値と同じ
+        box2_row["システムコード"] = str(row["コード"])  # 課金コードの基準（薬剤の手入力用）
         box2_row["状態"] = "未変更"            # 初期状態
         box2_rows.append(box2_row)
 
@@ -415,6 +435,7 @@ def save_edits(patient_id: int, surgery_date: str, box1_rows: list, expected_ver
             "患者ID": patient_id,
             "手術日": surgery_date,
             "コード": row["コード"],
+            "システムコード": row.get("システムコード", row["コード"]),
             "項目名": row["項目名"],
             "システム値": row["システム値"],
             "変更後の値": row["現在値"],

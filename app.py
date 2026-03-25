@@ -64,6 +64,12 @@ st.markdown("""
     .stDataFrame {
         font-size: 14px;
     }
+
+    /* 算定明細: st.html のホバーパネルが列の overflow で切れにくくする */
+    [data-testid="column"] {
+        overflow: visible !important;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -161,6 +167,7 @@ elif current_page == "算定明細":
         drugs_processed,
         star_items_df=star_items_df,
         navi_df=navi_result,
+        masui_time_raw_df=masui_time_df,
     )
 
 elif current_page == "データ出力":

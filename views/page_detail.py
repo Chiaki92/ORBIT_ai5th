@@ -5,9 +5,11 @@ page_detail.py — 画面2: 算定明細（編集・保存・確定）
 患者ごとの算定項目を表示し、ユーザーが値を編集・保存・確定できる。
 """
 
+import html
 import pandas as pd
 import streamlit as st
 
+from views.ui_helpers import zebra_row_container
 from state_manager import (
     build_box1,
     init_box2,
@@ -75,83 +77,245 @@ def _indices_by_kubun(box2: list) -> dict[str, list[int]]:
     return out
 
 
-def _render_santei_row(i: int, row: dict) -> None:
+def _sync_masui_segments_from_box1(box2: list, box1: list) -> None:
+    """
+    箱2は初回のみ箱1から作られるため、既存セッションでも麻酔の内訳を毎回箱1に合わせる。
+    （生データに基づく参照情報のため、編集内容には影響しない。）
+    """
+    by_id = {r["row_id"]: r for r in box1}
+    for r in box2:
+        if r.get("区分") != "麻酔":
+            continue
+        src = by_id.get(r["row_id"])
+        if not src:
+            continue
+        if src.get("麻酔時間内訳"):
+            r["麻酔時間内訳"] = src["麻酔時間内訳"]
+        else:
+            r.pop("麻酔時間内訳", None)
+
+
+def _masui_segments_tooltip_st_html(
+    row_index: int,
+    slot: str,
+    segments: list,
+    trigger_label: str,
+    *,
+    icon: bool = False,
+) -> str:
+    """
+    ホバーで内訳を表示する HTML（st.html 用）。
+
+    st.markdown の HTML は DOMPurify で class が落ち、app 側の CSS が効かないため、
+    行ごとにユニーク id と埋め込み <style> で :hover を定義する。
+    """
+    esc = html.escape
+    wrap_id = f"omw{row_index}{slot}"
+    panel_id = f"omp{row_index}{slot}"
+    esc_label = esc(trigger_label)
+    aria = esc("開始・終了・合計の内訳")
+
+    body_parts: list[str] = []
+    n = len(segments)
+    for idx, seg in enumerate(segments, start=1):
+        s0, s1, s2 = esc(str(seg["開始"])), esc(str(seg["終了"])), esc(str(seg["合計"]))
+        sep = "" if idx == n else "margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(30,58,95,.1);"
+        body_parts.append(
+            f'<div style="{sep}">'
+            f'<span style="display:block;font-weight:600;margin-bottom:4px;color:#1a5276;">区間 {idx}</span>'
+            f'<span style="color:#1e3a4c;">{s0} 〜 {s1}</span>'
+            f'<span style="display:block;margin-top:4px;font-size:12px;color:#5c7a8f;">合計 {s2}</span>'
+            f"</div>"
+        )
+    panel_body = "".join(body_parts)
+
+    if icon:
+        trig = (
+            "cursor:help;border-bottom:none;font-weight:600;font-size:1rem;line-height:1;"
+            "padding:2px 6px;border-radius:4px;color:#2e86c1;transition:background .15s,color .15s;"
+        )
+        trig_hover = f"#{wrap_id}:hover > span:first-child {{ color:#1a5276;background:rgba(46,134,193,.12); }}"
+    else:
+        trig = (
+            "cursor:help;border-bottom:1px dashed rgba(46,134,193,.75);"
+            "transition:border-color .15s,color .15s;"
+        )
+        trig_hover = (
+            f"#{wrap_id}:hover > span:first-child {{ "
+            f"border-bottom-color:rgba(26,82,118,.95) !important;color:#1a5276; }}"
+        )
+
+    panel_style = (
+        "position:absolute;left:0;top:100%;margin-top:8px;min-width:240px;max-width:min(360px,90vw);"
+        "padding:12px 14px;"
+        "background:linear-gradient(165deg,rgba(255,255,255,.98) 0%,#f5f9fc 45%,#eef6fb 100%);"
+        "color:#1e3a4c;font-size:13px;line-height:1.45;border-radius:10px;"
+        "box-shadow:0 10px 36px rgba(30,58,95,.1),0 2px 10px rgba(0,0,0,.06);"
+        "border:1px solid rgba(46,134,193,.2);opacity:0;visibility:hidden;"
+        "transform:translateY(-6px) scale(0.98);transition:opacity .2s ease,transform .22s cubic-bezier(0.22,1,0.36,1),visibility .2s;"
+        "z-index:999999;pointer-events:none;"
+    )
+
+    hover_panel = (
+        f"#{wrap_id}:hover #{panel_id} {{ "
+        f"opacity:1 !important;visibility:visible !important;"
+        f"transform:translateY(0) scale(1) !important;pointer-events:auto !important; }}"
+    )
+
+    return (
+        f"<style>{hover_panel}{trig_hover}</style>"
+        f'<div id="{wrap_id}" style="position:relative;display:inline-block;vertical-align:baseline;">'
+        f'<span style="{trig}" title="" aria-label="{aria}">{esc_label}</span>'
+        f'<div id="{panel_id}" role="tooltip" style="{panel_style}">{panel_body}</div>'
+        f"</div>"
+    )
+
+
+def _render_masui_tooltip_dg(dg, row_index: int, slot: str, segments: list, label: str, *, icon: bool = False) -> None:
+    """st.html が使える場合はサニタイズ後も style/id が効く。無ければ details でフォールバック。"""
+    fragment = _masui_segments_tooltip_st_html(row_index, slot, segments, label, icon=icon)
+    html_fn = getattr(dg, "html", None)
+    if callable(html_fn):
+        html_fn(fragment, width="content")
+    else:
+        lines = [
+            f"区間 {idx}: {seg['開始']} 〜 {seg['終了']}（合計 {seg['合計']}）"
+            for idx, seg in enumerate(segments, start=1)
+        ]
+        dg.markdown(
+            "<details><summary>" + html.escape(label) + "</summary><pre>"
+            + html.escape("\n".join(lines))
+            + "</pre></details>",
+            unsafe_allow_html=True,
+        )
+
+
+def _editable_billing_code_kubun(kubun: str) -> bool:
+    """課金コードを画面上で編集できる区分（プレースホルダが出るのは主に薬剤）。"""
+    return kubun in ("薬剤", "薬剤（術後鎮痛）")
+
+
+def _render_santei_row(i: int, row: dict, *, stripe_index: int) -> None:
     """算定項目の1行を描画し、row をその場で更新する。"""
     row_state = row["状態"]
+    masui_segments = row.get("麻酔時間内訳") or []
+    sys_code = str(row.get("システムコード", row.get("コード", "")))
 
-    if row_state == "削除":
-        cols = st.columns([1, 3, 1.5, 1.5, 1, 1.5])
-        cols[0].markdown(f"~~{row['区分']}~~")
-        cols[1].markdown(f"~~{row['項目名']}~~")
-        cols[2].markdown(f"~~{row['システム値']}~~")
-        cols[3].markdown(f"~~{row['現在値']}~~")
-        cols[4].markdown(f"~~{row['単位']}~~")
-        if cols[5].button("元に戻す", key=f"restore_{i}"):
-            row["状態"] = "未変更"
-            row["現在値"] = row["システム値"]
-        return
+    with zebra_row_container(stripe_index, f"orbit_santei_{i}"):
+        if row_state == "削除":
+            cols = st.columns([1, 2.2, 1.2, 1.2, 1.2, 1.2, 1.2])
+            cols[0].markdown(f"~~{row['区分']}~~")
+            cols[1].markdown(f"~~{row['項目名']}~~")
+            code_disp = row.get("コード", "")
+            cols[2].markdown(f"~~{code_disp if str(code_disp).strip() else '—'}~~")
+            cols[3].markdown(f"~~{row['システム値']}~~")
+            cols[4].markdown(f"~~{row['現在値']}~~")
+            cols[5].markdown(f"~~{row['単位']}~~")
+            if cols[6].button("元に戻す", key=f"restore_{i}"):
+                row["状態"] = "未変更"
+                row["現在値"] = row["システム値"]
+                row["コード"] = row.get("システムコード", row.get("コード", ""))
+            return
 
-    cols = st.columns([1, 3, 1.5, 1.5, 1, 1.5])
-    cols[0].write(row["区分"])
-    cols[1].write(row["項目名"])
-    cols[2].write(row["システム値"])
+        cols = st.columns([1, 2.2, 1.2, 1.2, 1.2, 1.2, 1.2])
+        cols[0].write(row["区分"])
+        cols[1].write(row["項目名"])
+        code_disp = row.get("コード", "")
+        if _editable_billing_code_kubun(row["区分"]):
+            new_code = cols[2].text_input(
+                "課金コード",
+                value=str(code_disp),
+                key=f"code_{i}",
+                label_visibility="collapsed",
+            )
+        else:
+            cols[2].write(str(code_disp) if str(code_disp).strip() else "—")
+            new_code = str(code_disp)
 
-    if row["区分"] == "ナビ":
-        new_value = cols[3].selectbox(
-            "現在値",
-            options=["対象", "非対象", "判定不可"],
-            index=["対象", "非対象", "判定不可"].index(str(row["現在値"])) if str(row["現在値"]) in ["対象", "非対象", "判定不可"] else 2,
-            key=f"val_{i}",
-            label_visibility="collapsed",
-        )
-    else:
-        new_value = cols[3].text_input(
-            "現在値",
-            value=str(row["現在値"]),
-            key=f"val_{i}",
-            label_visibility="collapsed",
-        )
+        if row["区分"] == "麻酔" and masui_segments:
+            _render_masui_tooltip_dg(cols[3], i, "sys", masui_segments, str(row["システム値"]), icon=False)
+        else:
+            cols[3].write(row["システム値"])
 
-    cols[4].write(row["単位"])
+        if row["区分"] == "ナビ":
+            new_value = cols[4].selectbox(
+                "現在値",
+                options=["対象", "非対象", "判定不可"],
+                index=["対象", "非対象", "判定不可"].index(str(row["現在値"])) if str(row["現在値"]) in ["対象", "非対象", "判定不可"] else 2,
+                key=f"val_{i}",
+                label_visibility="collapsed",
+            )
+        else:
+            if row["区分"] == "麻酔" and masui_segments:
+                c4a, c4b = cols[4].columns([5.2, 0.55], vertical_alignment="center")
+                new_value = c4a.text_input(
+                    "現在値",
+                    value=str(row["現在値"]),
+                    key=f"val_{i}",
+                    label_visibility="collapsed",
+                )
+                _render_masui_tooltip_dg(c4b, i, "ico", masui_segments, "ⓘ", icon=True)
+            else:
+                new_value = cols[4].text_input(
+                    "現在値",
+                    value=str(row["現在値"]),
+                    key=f"val_{i}",
+                    label_visibility="collapsed",
+                )
 
-    if str(new_value) != str(row["システム値"]):
-        row["現在値"] = new_value
-        if row["状態"] != "追加":
-            row["状態"] = "修正済み"
-    else:
-        row["現在値"] = new_value
-        if row["状態"] == "修正済み":
-            row["状態"] = "未変更"
+        cols[5].write(row["単位"])
 
-    if row_state == "修正済み":
-        if cols[5].button("元に戻す", key=f"revert_{i}"):
-            row["現在値"] = row["システム値"]
-            row["状態"] = "未変更"
-    elif row_state == "追加":
-        if cols[5].button("削除", key=f"del_added_{i}"):
-            row["状態"] = "削除"
-    else:
-        if cols[5].button("削除", key=f"del_{i}"):
-            row["状態"] = "削除"
+        if _editable_billing_code_kubun(row["区分"]):
+            row["コード"] = new_code
 
-    if row_state == "修正済み":
-        cols[5].caption("✏️ 変更")
-    elif row_state == "追加":
-        cols[5].caption("🆕 追加")
+        code_changed = str(new_code).strip() != str(sys_code).strip()
+        value_changed = str(new_value) != str(row["システム値"])
+        if code_changed or value_changed:
+            row["現在値"] = new_value
+            if row["状態"] != "追加":
+                row["状態"] = "修正済み"
+        else:
+            row["現在値"] = new_value
+            if row["状態"] == "修正済み":
+                row["状態"] = "未変更"
+
+        if row_state == "修正済み":
+            if cols[6].button("元に戻す", key=f"revert_{i}"):
+                row["現在値"] = row["システム値"]
+                row["コード"] = sys_code
+                row["状態"] = "未変更"
+        elif row_state == "追加":
+            if cols[6].button("削除", key=f"del_added_{i}"):
+                row["状態"] = "削除"
+        else:
+            if cols[6].button("削除", key=f"del_{i}"):
+                row["状態"] = "削除"
+
+        if row_state == "修正済み":
+            cols[6].caption("✏️ 変更")
+        elif row_state == "追加":
+            cols[6].caption("🆕 追加")
 
 
-def _get_masui_start_time(masui_df: pd.DataFrame, patient_id: int) -> str:
+def _get_masui_start_time(
+    masui_df: pd.DataFrame, patient_id: int, surgery_date: str | None = None
+) -> str:
     """
     麻酔開始時間を取得する。
 
     引数:
       masui_df: apply_masui_rules() の出力
       patient_id: 患者ID
+      surgery_date: 手術日（列がある場合はこの日で絞り込む）
 
     戻り値:
       麻酔開始時間の文字列（例: "08:38"）。データがない場合は "-"
     """
     patient_data = masui_df[masui_df["患者ID"] == patient_id]
+    if surgery_date is not None and "手術日" in patient_data.columns:
+        patient_data = patient_data[
+            patient_data["手術日"].astype(str) == str(surgery_date)
+        ]
     if patient_data.empty:
         return "-"
     # 麻酔開始時間は全行で同じ値なので先頭行を取る
@@ -166,6 +330,7 @@ def render_detail(
     drugs_df: pd.DataFrame,
     star_items_df: pd.DataFrame | None = None,
     navi_df: pd.DataFrame | None = None,
+    masui_time_raw_df: pd.DataFrame | None = None,
 ):
     """
     算定明細画面を描画する。
@@ -180,6 +345,7 @@ def render_detail(
       masui_df: apply_masui_rules() の出力
       kensa_df: apply_kensa_rules() の出力
       drugs_df: apply_drug_rules() の出力
+      masui_time_raw_df: load_masui_time() の生データ（開始・終了の内訳表示用）
     """
     st.subheader("算定明細")
 
@@ -280,7 +446,7 @@ def render_detail(
     patient_name = patient_row["患者氏名"] if pd.notna(patient_row["患者氏名"]) else ""
     dept = str(patient_row["診療科"]).replace("\n", "・") if pd.notna(patient_row["診療科"]) else ""
     procedure = patient_row["確定術式"] if pd.notna(patient_row.get("確定術式")) else ""
-    masui_start = _get_masui_start_time(masui_df, patient_id)
+    masui_start = _get_masui_start_time(masui_df, patient_id, surgery_date)
 
     st.header(f"{patient_name}（{patient_id}）")
     col1, col2, col3 = st.columns(3)
@@ -322,9 +488,11 @@ def render_detail(
         star_items_df=star_items_df,
         navi_df=navi_df,
         surgery_date=surgery_date,
+        masui_time_raw_df=masui_time_raw_df,
     )
     init_box2(patient_id, box1)
     box2 = get_box2(patient_id)
+    _sync_masui_segments_from_box1(box2, box1)
 
     # --- 未保存警告のJavaScript（ブラウザ閉じ防止） ---
     if has_unsaved_changes(patient_id):
@@ -338,16 +506,23 @@ def render_detail(
 
     # --- 算定テーブルの表示・編集（区分ごとにタブ） ---
     st.subheader("算定項目")
-    st.caption("区分ごとにタブを切り替えて確認・編集できます。")
+    st.caption(
+        "区分ごとにタブを切り替えて確認・編集できます。"
+        " **課金コード** はコストシステム入力用（データ出力の「コード+数量」と対応）。"
+        " **薬剤**・**薬剤（術後鎮痛）** の行では、ルールが「要手入力」「登録なし」などとしたコードをこの列で直接修正できます（**現在値** は数量のまま）。"
+        " 区分が「薬剤（術後鎮痛）」の行は、出力・コピペ時にコード先頭へ **/33+** が付きます。"
+        " **麻酔**の時間は、下線の数字にカーソルを合わせると開始・終了の内訳が表示されます（現在値は右の **ⓘ** にも同じ内訳があります）。"
+    )
 
     def _render_santei_table_header() -> None:
-        header_cols = st.columns([1, 3, 1.5, 1.5, 1, 1.5])
+        header_cols = st.columns([1, 2.2, 1.2, 1.2, 1.2, 1.2, 1.2])
         header_cols[0].markdown("**区分**")
         header_cols[1].markdown("**項目名**")
-        header_cols[2].markdown("**システム値**")
-        header_cols[3].markdown("**現在値**")
-        header_cols[4].markdown("**単位**")
-        header_cols[5].markdown("**操作**")
+        header_cols[2].markdown("**課金コード**")
+        header_cols[3].markdown("**システム値**")
+        header_cols[4].markdown("**現在値**")
+        header_cols[5].markdown("**単位**")
+        header_cols[6].markdown("**操作**")
 
     if not box2:
         st.info("算定項目がありません。")
@@ -359,8 +534,8 @@ def render_detail(
             with tab_panel:
                 _render_santei_table_header()
                 st.divider()
-                for i in by_kubun.get(kubun, []):
-                    _render_santei_row(i, box2[i])
+                for stripe_j, i in enumerate(by_kubun.get(kubun, [])):
+                    _render_santei_row(i, box2[i], stripe_index=stripe_j)
 
     update_box2(patient_id, list(box2))
 
@@ -400,6 +575,7 @@ def render_detail(
                     "区分": new_kubun,
                     "項目名": new_name,
                     "コード": new_code,
+                    "システムコード": new_code,
                     "数量": new_qty,
                     "単位": new_unit,
                     "システム値": "-",
