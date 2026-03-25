@@ -74,9 +74,16 @@ def _check_clinical_engineer(patient_id: int, surgery_date: str, kiji_df: pd.Dat
         patient_kiji = patient_kiji.copy()
         patient_kiji["_date_normalized"] = pd.to_datetime(patient_kiji[date_col], errors="coerce")
 
-        # 同日のレコードがあればTrue
+        # 同日のレコードを抽出
         same_day = patient_kiji[patient_kiji["_date_normalized"] == surgery_dt]
-        return not same_day.empty
+        if same_day.empty:
+            return False
+
+        # 「記載者職種」が「臨床工学」のレコードがあるかチェック
+        if "記載者職種" not in same_day.columns:
+            return None
+        has_ce = same_day["記載者職種"].astype(str).str.contains("臨床工学", na=False).any()
+        return has_ce
     except Exception:
         return None
 
