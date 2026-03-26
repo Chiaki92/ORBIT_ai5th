@@ -9,7 +9,12 @@ import html
 import pandas as pd
 import streamlit as st
 
-from views.ui_helpers import zebra_row_container
+from views.ui_helpers import zebra_row_container, inject_colored_cell_style
+from views.santei_format import (
+    description_line,
+    paste_code_line,
+    seishoku_display,
+)
 from state_manager import (
     build_box1,
     init_box2,
@@ -195,75 +200,169 @@ def _editable_billing_code_kubun(kubun: str) -> bool:
     return kubun in ("薬剤", "薬剤（術後鎮痛）")
 
 
-def _render_santei_row(i: int, row: dict, *, stripe_index: int) -> None:
+def _render_santei_grid_header() -> None:
+    """スプレッドシート風の列見出し（画像の帳票イメージに合わせる）。"""
+    st.markdown(
+        """
+<style>
+.orbit-santei-head { display: grid; grid-template-columns: minmax(0,2.2fr) 1fr 1.2fr 1fr 1.2fr 0.85fr; gap: 0; align-items: stretch; font-size: 13px; font-weight: 600; border-bottom: 2px solid #333; margin-bottom: 4px; }
+.orbit-santei-head > div { padding: 8px 6px; border-top: 1px solid #bbb; border-right: 1px solid #bbb; border-bottom: 1px solid #bbb; }
+.orbit-santei-head > div:first-child { border-left: 1px solid #bbb; }
+.orbit-santei-h-desc { background: #fafafa; }
+.orbit-santei-h-code { background: #fff9c4; }
+.orbit-santei-h-qty { background: #ffe0b2; }
+.orbit-santei-h-sei { background: #fffde7; }
+.orbit-santei-h-paste { background: #e3f2fd; border-left: 3px solid #000 !important; }
+</style>
+<div class="orbit-santei-head">
+  <div class="orbit-santei-h-desc">↓ 貼り付け / Paste</div>
+  <div class="orbit-santei-h-code">課金コード</div>
+  <div class="orbit-santei-h-qty">使用量（システム値 / 現在値）</div>
+  <div class="orbit-santei-h-sei">生食課金コード</div>
+  <div class="orbit-santei-h-paste">貼り付けコード</div>
+  <div class="orbit-santei-h-desc">操作</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_santei_row(
+    i: int,
+    row: dict,
+    *,
+    stripe_index: int,
+    box1_by_id: dict,
+) -> None:
     """算定項目の1行を描画し、row をその場で更新する。"""
+    row.setdefault("生食課金コード", "")
     row_state = row["状態"]
     masui_segments = row.get("麻酔時間内訳") or []
     sys_code = str(row.get("システムコード", row.get("コード", "")))
+    src_box1 = box1_by_id.get(row["row_id"])
 
     with zebra_row_container(stripe_index, f"orbit_santei_{i}"):
         if row_state == "削除":
-            cols = st.columns([1, 2.2, 1.2, 1.2, 1.2, 1.2, 1.2])
-            cols[0].markdown(f"~~{row['区分']}~~")
-            cols[1].markdown(f"~~{row['項目名']}~~")
-            code_disp = row.get("コード", "")
-            cols[2].markdown(f"~~{code_disp if str(code_disp).strip() else '—'}~~")
-            cols[3].markdown(f"~~{row['システム値']}~~")
-            cols[4].markdown(f"~~{row['現在値']}~~")
-            cols[5].markdown(f"~~{row['単位']}~~")
-            if cols[6].button("元に戻す", key=f"restore_{i}"):
-                row["状態"] = "未変更"
-                row["現在値"] = row["システム値"]
-                row["コード"] = row.get("システムコード", row.get("コード", ""))
+            cols = st.columns([2.2, 1.0, 1.3, 1.0, 1.3, 1.0])
+            with cols[0]:
+                inject_colored_cell_style(f"orbit_desc_{i}", "#fafafa")
+                with st.container(key=f"orbit_desc_{i}"):
+                    st.markdown(f"~~{html.escape(description_line(row))}~~", unsafe_allow_html=True)
+            with cols[1]:
+                inject_colored_cell_style(f"orbit_code_{i}", "#fff9c4")
+                with st.container(key=f"orbit_code_{i}"):
+                    code_disp = row.get("コード", "")
+                    st.markdown(
+                        f"~~{html.escape(str(code_disp) if str(code_disp).strip() else '—')}~~",
+                        unsafe_allow_html=True,
+                    )
+            with cols[2]:
+                inject_colored_cell_style(f"orbit_qty_{i}", "#ffe0b2")
+                with st.container(key=f"orbit_qty_{i}"):
+                    st.markdown(
+                        f"~~システム: {html.escape(str(row['システム値']))} / 現在: {html.escape(str(row['現在値']))}~~",
+                        unsafe_allow_html=True,
+                    )
+            with cols[3]:
+                inject_colored_cell_style(f"orbit_sei_{i}", "#fffde7")
+                with st.container(key=f"orbit_sei_{i}"):
+                    st.markdown(
+                        f"~~{html.escape(seishoku_display(row))}~~",
+                        unsafe_allow_html=True,
+                    )
+            with cols[4]:
+                inject_colored_cell_style(f"orbit_paste_{i}", "#e3f2fd", left_border="3px solid #000")
+                with st.container(key=f"orbit_paste_{i}"):
+                    pd = paste_code_line(row) or "—"
+                    st.markdown(f"~~{html.escape(pd)}~~", unsafe_allow_html=True)
+            with cols[5]:
+                inject_colored_cell_style(f"orbit_act_{i}", "#fafafa")
+                with st.container(key=f"orbit_act_{i}"):
+                    if st.button("元に戻す", key=f"restore_{i}"):
+                        row["状態"] = "未変更"
+                        row["現在値"] = row["システム値"]
+                        row["コード"] = row.get("システムコード", row.get("コード", ""))
+                        if src_box1 is not None:
+                            row["生食課金コード"] = src_box1.get("生食課金コード", "")
             return
 
-        cols = st.columns([1, 2.2, 1.2, 1.2, 1.2, 1.2, 1.2])
-        cols[0].write(row["区分"])
-        cols[1].write(row["項目名"])
+        cols = st.columns([2.2, 1.0, 1.3, 1.0, 1.3, 1.0])
+
+        with cols[0]:
+            inject_colored_cell_style(f"orbit_desc_{i}", "#fafafa")
+            with st.container(key=f"orbit_desc_{i}"):
+                st.markdown(html.escape(description_line(row)), unsafe_allow_html=True)
+
         code_disp = row.get("コード", "")
-        if _editable_billing_code_kubun(row["区分"]):
-            new_code = cols[2].text_input(
-                "課金コード",
-                value=str(code_disp),
-                key=f"code_{i}",
-                label_visibility="collapsed",
-            )
-        else:
-            cols[2].write(str(code_disp) if str(code_disp).strip() else "—")
-            new_code = str(code_disp)
+        with cols[1]:
+            inject_colored_cell_style(f"orbit_code_{i}", "#fff9c4")
+            with st.container(key=f"orbit_code_{i}"):
+                if _editable_billing_code_kubun(row["区分"]):
+                    new_code = st.text_input(
+                        "課金コード",
+                        value=str(code_disp),
+                        key=f"code_{i}",
+                        label_visibility="collapsed",
+                    )
+                else:
+                    st.markdown(
+                        html.escape(str(code_disp) if str(code_disp).strip() else "—"),
+                        unsafe_allow_html=True,
+                    )
+                    new_code = str(code_disp)
 
-        if row["区分"] == "麻酔" and masui_segments:
-            _render_masui_tooltip_dg(cols[3], i, "sys", masui_segments, str(row["システム値"]), icon=False)
-        else:
-            cols[3].write(row["システム値"])
+        with cols[2]:
+            inject_colored_cell_style(f"orbit_qty_{i}", "#ffe0b2")
+            with st.container(key=f"orbit_qty_{i}"):
+                st.caption("システム値")
+                if row["区分"] == "麻酔" and masui_segments:
+                    _render_masui_tooltip_dg(st, i, "sys", masui_segments, str(row["システム値"]), icon=False)
+                else:
+                    st.write(row["システム値"])
+                st.caption("現在値")
+                if row["区分"] == "ナビ":
+                    new_value = st.selectbox(
+                        "現在値",
+                        options=["対象", "非対象", "判定不可"],
+                        index=["対象", "非対象", "判定不可"].index(str(row["現在値"]))
+                        if str(row["現在値"]) in ["対象", "非対象", "判定不可"]
+                        else 2,
+                        key=f"val_{i}",
+                        label_visibility="collapsed",
+                    )
+                elif row["区分"] == "麻酔" and masui_segments:
+                    c4a, c4b = st.columns([5.2, 0.55], vertical_alignment="center")
+                    with c4a:
+                        new_value = st.text_input(
+                            "現在値",
+                            value=str(row["現在値"]),
+                            key=f"val_{i}",
+                            label_visibility="collapsed",
+                        )
+                    with c4b:
+                        _render_masui_tooltip_dg(c4b, i, "ico", masui_segments, "ⓘ", icon=True)
+                else:
+                    new_value = st.text_input(
+                        "現在値",
+                        value=str(row["現在値"]),
+                        key=f"val_{i}",
+                        label_visibility="collapsed",
+                    )
 
-        if row["区分"] == "ナビ":
-            new_value = cols[4].selectbox(
-                "現在値",
-                options=["対象", "非対象", "判定不可"],
-                index=["対象", "非対象", "判定不可"].index(str(row["現在値"])) if str(row["現在値"]) in ["対象", "非対象", "判定不可"] else 2,
-                key=f"val_{i}",
-                label_visibility="collapsed",
-            )
-        else:
-            if row["区分"] == "麻酔" and masui_segments:
-                c4a, c4b = cols[4].columns([5.2, 0.55], vertical_alignment="center")
-                new_value = c4a.text_input(
-                    "現在値",
-                    value=str(row["現在値"]),
-                    key=f"val_{i}",
-                    label_visibility="collapsed",
-                )
-                _render_masui_tooltip_dg(c4b, i, "ico", masui_segments, "ⓘ", icon=True)
-            else:
-                new_value = cols[4].text_input(
-                    "現在値",
-                    value=str(row["現在値"]),
-                    key=f"val_{i}",
-                    label_visibility="collapsed",
-                )
+        _tmp = {**row, "コード": new_code, "現在値": new_value}
+        paste_disp = paste_code_line(_tmp)
+        if not paste_disp:
+            paste_disp = "—"
 
-        cols[5].write(row["単位"])
+        with cols[3]:
+            inject_colored_cell_style(f"orbit_sei_{i}", "#fffde7")
+            with st.container(key=f"orbit_sei_{i}"):
+                st.markdown(html.escape(seishoku_display(row)), unsafe_allow_html=True)
+
+        with cols[4]:
+            inject_colored_cell_style(f"orbit_paste_{i}", "#e3f2fd", left_border="3px solid #000")
+            with st.container(key=f"orbit_paste_{i}"):
+                st.markdown(html.escape(paste_disp), unsafe_allow_html=True)
 
         if _editable_billing_code_kubun(row["区分"]):
             row["コード"] = new_code
@@ -279,22 +378,26 @@ def _render_santei_row(i: int, row: dict, *, stripe_index: int) -> None:
             if row["状態"] == "修正済み":
                 row["状態"] = "未変更"
 
-        if row_state == "修正済み":
-            if cols[6].button("元に戻す", key=f"revert_{i}"):
-                row["現在値"] = row["システム値"]
-                row["コード"] = sys_code
-                row["状態"] = "未変更"
-        elif row_state == "追加":
-            if cols[6].button("削除", key=f"del_added_{i}"):
-                row["状態"] = "削除"
-        else:
-            if cols[6].button("削除", key=f"del_{i}"):
-                row["状態"] = "削除"
-
-        if row_state == "修正済み":
-            cols[6].caption("✏️ 変更")
-        elif row_state == "追加":
-            cols[6].caption("🆕 追加")
+        with cols[5]:
+            inject_colored_cell_style(f"orbit_act_{i}", "#fafafa")
+            with st.container(key=f"orbit_act_{i}"):
+                if row_state == "修正済み":
+                    if st.button("元に戻す", key=f"revert_{i}"):
+                        row["現在値"] = row["システム値"]
+                        row["コード"] = sys_code
+                        if src_box1 is not None:
+                            row["生食課金コード"] = src_box1.get("生食課金コード", "")
+                        row["状態"] = "未変更"
+                elif row_state == "追加":
+                    if st.button("削除", key=f"del_added_{i}"):
+                        row["状態"] = "削除"
+                else:
+                    if st.button("削除", key=f"del_{i}"):
+                        row["状態"] = "削除"
+                if row_state == "修正済み":
+                    st.caption("✏️ 変更")
+                elif row_state == "追加":
+                    st.caption("🆕 追加")
 
 
 def _get_masui_start_time(
@@ -508,34 +611,26 @@ def render_detail(
     st.subheader("算定項目")
     st.caption(
         "区分ごとにタブを切り替えて確認・編集できます。"
-        " **課金コード** はコストシステム入力用（データ出力の「コード+数量」と対応）。"
-        " **薬剤**・**薬剤（術後鎮痛）** の行では、ルールが「要手入力」「登録なし」などとしたコードをこの列で直接修正できます（**現在値** は数量のまま）。"
+        " 列は帳票イメージに合わせています（貼り付け / 課金コード / 使用量 / 生食課金コード / 貼り付けコード）。"
+        " **課金コード** はコストシステム入力用（**貼り付けコード**列の「コード+数量」と対応）。"
+        " **薬剤**・**薬剤（術後鎮痛）** の行では、ルールが「要手入力」「登録なし」などとしたコードを課金コード列で直接修正できます（**使用量**の現在値は数量のまま）。"
         " 区分が「薬剤（術後鎮痛）」の行は、出力・コピペ時にコード先頭へ **/33+** が付きます。"
-        " **麻酔**の時間は、下線の数字にカーソルを合わせると開始・終了の内訳が表示されます（現在値は右の **ⓘ** にも同じ内訳があります）。"
+        " **麻酔**のシステム値は下線の数字にカーソルを合わせると開始・終了の内訳が表示されます（現在値の **ⓘ** にも同じ内訳があります）。"
     )
-
-    def _render_santei_table_header() -> None:
-        header_cols = st.columns([1, 2.2, 1.2, 1.2, 1.2, 1.2, 1.2])
-        header_cols[0].markdown("**区分**")
-        header_cols[1].markdown("**項目名**")
-        header_cols[2].markdown("**課金コード**")
-        header_cols[3].markdown("**システム値**")
-        header_cols[4].markdown("**現在値**")
-        header_cols[5].markdown("**単位**")
-        header_cols[6].markdown("**操作**")
 
     if not box2:
         st.info("算定項目がありません。")
     else:
+        box1_by_id = {r["row_id"]: r for r in box1}
         kubun_order = _ordered_kubun_labels(box2)
         by_kubun = _indices_by_kubun(box2)
         tab_list = st.tabs(kubun_order)
         for tab_panel, kubun in zip(tab_list, kubun_order):
             with tab_panel:
-                _render_santei_table_header()
+                _render_santei_grid_header()
                 st.divider()
                 for stripe_j, i in enumerate(by_kubun.get(kubun, [])):
-                    _render_santei_row(i, box2[i], stripe_index=stripe_j)
+                    _render_santei_row(i, box2[i], stripe_index=stripe_j, box1_by_id=box1_by_id)
 
     update_box2(patient_id, list(box2))
 
@@ -581,6 +676,7 @@ def render_detail(
                     "システム値": "-",
                     "現在値": new_qty,
                     "状態": "追加",
+                    "生食課金コード": "",
                 }
                 current_box2.append(new_row)
                 update_box2(patient_id, current_box2)

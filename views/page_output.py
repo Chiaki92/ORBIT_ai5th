@@ -17,6 +17,7 @@ from state_manager import (
     get_patient_status,
     get_all_patient_statuses,
 )
+from views.santei_format import description_line, paste_code_line, seishoku_csv_value
 
 
 def _build_output_text(box2_rows: list) -> str:
@@ -107,15 +108,20 @@ def _build_download_df(
         for row in box2:
             if row["状態"] == "削除":
                 continue
+            row.setdefault("生食課金コード", "")
             all_rows.append({
                 "患者ID": pid,
                 "患者氏名": patient_name,
                 "手術日": surgery_date,
                 "区分": row["区分"],
+                "貼り付け": description_line(row),
                 "項目名": row["項目名"],
-                "コード": row["コード"],
-                "数量": row["現在値"],
+                "課金コード": row["コード"],
+                "システム値": row["システム値"],
+                "現在値": row["現在値"],
                 "単位": row["単位"],
+                "生食課金コード": seishoku_csv_value(row),
+                "貼り付けコード": paste_code_line(row),
             })
 
     return pd.DataFrame(all_rows)

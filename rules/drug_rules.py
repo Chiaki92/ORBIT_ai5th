@@ -79,10 +79,11 @@ def apply_drug_rules(
       df_seishoku_master: load_seishoku_master()で取得したDataFrame
 
     戻り値:
-      DataFrame（列: 患者ID, 手術日, カテゴリ, 名称, コード, 請求量, 請求単位, 術後鎮痛薬フラグ）
+      DataFrame（列: 患者ID, 手術日, カテゴリ, 名称, コード, 請求量, 請求単位, 術後鎮痛薬フラグ, 生食課金コード）
     """
     # データのコピーを作成（元データを変更しないため）
     df = df_drugs.copy()
+    df["生食課金コード"] = ""
 
     # --- ステップ1: 医事コードのXプレフィックスを除去 ---
     df["コード"] = df["医事コード"].apply(_strip_x_prefix)
@@ -105,6 +106,7 @@ def apply_drug_rules(
             # 請求量（ml）に応じた課金コードを取得
             new_code = _convert_seishoku_code(row["請求量"], df_seishoku_master)
             df.at[idx, "コード"] = new_code
+            df.at[idx, "生食課金コード"] = new_code
 
     # --- ステップ3: 術後鎮痛薬フラグ ---
     # カテゴリが「術後鎮痛薬」の行にフラグを立てる
@@ -112,6 +114,18 @@ def apply_drug_rules(
     df["術後鎮痛薬フラグ"] = df["カテゴリ"] == "術後鎮痛薬"
 
     # --- ステップ4: 必要な列だけ選択して返す ---
-    result = df[["患者ID", "手術日", "カテゴリ", "名称", "コード", "請求量", "請求単位", "術後鎮痛薬フラグ"]].copy()
+    result = df[
+        [
+            "患者ID",
+            "手術日",
+            "カテゴリ",
+            "名称",
+            "コード",
+            "請求量",
+            "請求単位",
+            "術後鎮痛薬フラグ",
+            "生食課金コード",
+        ]
+    ].copy()
 
     return result

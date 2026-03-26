@@ -118,6 +118,7 @@ def build_box1(
             "コード": code,
             "数量": str(row["合計時間"]),
             "単位": "時間",
+            "生食課金コード": "",
         }
         if seg_list:
             masui_row["麻酔時間内訳"] = seg_list
@@ -135,6 +136,7 @@ def build_box1(
             "コード": str(row["コード"]),
             "数量": str(row["回数"]),
             "単位": "回",
+            "生食課金コード": "",
         })
         counter += 1
 
@@ -144,6 +146,9 @@ def build_box1(
     non_postop = patient_drugs[~patient_drugs["術後鎮痛薬フラグ"]]
     counter = 1
     for _, row in non_postop.iterrows():
+        seishoku = ""
+        if "生食課金コード" in row.index and pd.notna(row.get("生食課金コード")):
+            seishoku = str(row["生食課金コード"]).strip()
         rows.append({
             "row_id": f"drug_{counter:03d}",
             "区分": "薬剤",
@@ -151,12 +156,16 @@ def build_box1(
             "コード": str(row["コード"]),
             "数量": str(row["請求量"]),
             "単位": str(row["請求単位"]) if pd.notna(row["請求単位"]) else "",
+            "生食課金コード": seishoku,
         })
         counter += 1
 
     # --- 薬剤データ（術後鎮痛薬）→ リスト末尾に配置 ---
     postop = patient_drugs[patient_drugs["術後鎮痛薬フラグ"]]
     for _, row in postop.iterrows():
+        seishoku = ""
+        if "生食課金コード" in row.index and pd.notna(row.get("生食課金コード")):
+            seishoku = str(row["生食課金コード"]).strip()
         rows.append({
             "row_id": f"drug_{counter:03d}",
             "区分": "薬剤（術後鎮痛）",
@@ -164,6 +173,7 @@ def build_box1(
             "コード": str(row["コード"]),
             "数量": str(row["請求量"]),
             "単位": str(row["請求単位"]) if pd.notna(row["請求単位"]) else "",
+            "生食課金コード": seishoku,
         })
         counter += 1
 
@@ -188,6 +198,7 @@ def build_box1(
                     "コード": "",
                     "数量": text,
                     "単位": "",
+                    "生食課金コード": "",
                 })
 
     # --- ナビ（最後に追加） ---
@@ -213,6 +224,7 @@ def build_box1(
         "コード": "",
         "数量": navi_flag,
         "単位": "",
+        "生食課金コード": "",
     })
 
     return rows

@@ -28,3 +28,22 @@ def zebra_row_container(stripe_index: int, row_css_key: str):
     )
     with st.container(key=row_css_key):
         yield
+
+
+def inject_colored_cell_style(
+    cell_key: str,
+    bg: str,
+    *,
+    left_border: str | None = None,
+) -> None:
+    """
+    直後の st.container(key=cell_key) に背景色（と任意の左ボーダー）を付ける。
+    算定表の「課金コード」「使用量」など列ごとの色分け用。
+    """
+    left = f"border-left: {left_border} !important;" if left_border else ""
+    st.html(
+        f"<style>.st-key-{cell_key} {{ background: {bg} !important; padding: 6px 8px !important; "
+        f"border-radius: 4px; border: 1px solid #d0d0d0; {left} }}</style>"
+        '<span aria-hidden="true" style="display:none">.</span>',
+        width="content",
+    )
