@@ -139,12 +139,16 @@ def apply_masui_rules(df_masui_time: pd.DataFrame) -> pd.DataFrame:
     df["合計_分"] = df["合計"].apply(_parse_time_to_minutes)
 
     # グループ化して合算
+    agg_dict = {
+        "名称": ("名称", "first"),       # 同一コードの名称は同じなので先頭を取る
+        "合計_分": ("合計_分", "sum"),     # 分単位で合算
+    }
+    # 元データ確認用: ファイル名があれば先頭を保持
+    if "ファイル名" in df.columns:
+        agg_dict["ファイル名"] = ("ファイル名", "first")
     grouped = (
         df.groupby(["患者ID", "手術日", "コード"])
-        .agg(
-            名称=("名称", "first"),       # 同一コードの名称は同じなので先頭を取る
-            合計_分=("合計_分", "sum"),     # 分単位で合算
-        )
+        .agg(**agg_dict)
         .reset_index()
     )
 

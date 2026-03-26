@@ -640,7 +640,10 @@ def render_detail(
     with st.expander("＋ 項目を追加"):
         add_cols = st.columns([1, 3, 1.5, 1.5, 1])
         new_kubun = add_cols[0].selectbox(
-            "区分", ["麻酔", "検査", "薬剤", "★項目", "ナビ"], key="add_kubun"
+            "追加先",
+            ["麻酔", "検査", "薬剤", "★項目", "ナビ"],
+            key="add_kubun",
+            help="タブのグループ（麻酔・検査・薬剤など）と同じ区分に追加します。",
         )
 
         if new_kubun == "ナビ":

@@ -64,12 +64,12 @@ def normalize_surgery_date(val) -> str:
 def _common_preprocess(df: pd.DataFrame) -> pd.DataFrame:
     """
     全テーブル共通の前処理を行う。
-    1. 「ファイル名」「取込日時」列があれば削除
+    1. 「取込日時」列があれば削除（「ファイル名」は元データ確認用に保持）
     2. 「患者ID」列を整数に変換
     3. 「手術日」列の曜日を除去
     """
-    # 不要な列を削除（存在する場合のみ）
-    drop_cols = ["ファイル名", "取込日時"]
+    # 取込日時のみ削除（ファイル名は元データ確認機能で使用するため保持）
+    drop_cols = ["取込日時"]
     existing_drop_cols = [c for c in drop_cols if c in df.columns]
     if existing_drop_cols:
         df = df.drop(columns=existing_drop_cols)
