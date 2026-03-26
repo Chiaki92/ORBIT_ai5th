@@ -127,6 +127,51 @@ def _build_download_df(
     return pd.DataFrame(all_rows)
 
 
+def _build_patient_paste_df(
+    header_df: pd.DataFrame,
+    patient_ids: list,
+    masui_df: pd.DataFrame,
+    kensa_df: pd.DataFrame,
+    drugs_df: pd.DataFrame,
+    star_items_df: pd.DataFrame | None = None,
+    navi_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """
+    患者ごとの「コピペ本文（複数行）」をCSV化するためのDataFrameを構築する。
+    """
+    rows = []
+    for pid in patient_ids:
+        p_row = header_df[header_df["患者ID"] == pid]
+        if p_row.empty:
+            continue
+        p_row = p_row.iloc[0]
+
+        patient_name = p_row["患者氏名"] if pd.notna(p_row["患者氏名"]) else ""
+        surgery_date = p_row["手術日"]
+
+        box1 = build_box1(
+            pid,
+            masui_df,
+            kensa_df,
+            drugs_df,
+            star_items_df=star_items_df,
+            navi_df=navi_df,
+            surgery_date=surgery_date,
+        )
+        init_box2(pid, box1)
+        box2 = get_box2(pid)
+        output_text = _build_output_text(box2)
+
+        rows.append({
+            "患者ID": pid,
+            "患者氏名": patient_name,
+            "手術日": surgery_date,
+            "貼り付け本文": output_text,
+        })
+
+    return pd.DataFrame(rows)
+
+
 def render_output(
     header_df: pd.DataFrame,
     masui_df: pd.DataFrame,
@@ -226,12 +271,30 @@ def render_output(
         st.info("ダウンロードするデータがありません。")
         return
 
-    # CSVダウンロード
+    # CSVダウンロード（行単位の一覧）
     csv_data = download_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
         label="📥 CSVダウンロード",
         data=csv_data,
         file_name="orbit_output.csv",
+        mime="text/csv",
+    )
+
+    # CSVダウンロード（患者ごとのコピペ本文）
+    patient_paste_df = _build_patient_paste_df(
+        header_df,
+        target_ids,
+        masui_df,
+        kensa_df,
+        drugs_df,
+        star_items_df=star_items_df,
+        navi_df=navi_df,
+    )
+    patient_paste_csv = patient_paste_df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        label="📥 患者別コピペCSVダウンロード",
+        data=patient_paste_csv,
+        file_name="orbit_patient_paste.csv",
         mime="text/csv",
     )
 

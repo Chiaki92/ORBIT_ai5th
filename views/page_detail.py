@@ -6,8 +6,11 @@ page_detail.py — 画面2: 算定明細（編集・保存・確定）
 """
 
 import html
+import json
+import base64
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as st_components
 
 from views.ui_helpers import zebra_row_container, inject_colored_cell_style
 from views.santei_format import (
@@ -195,6 +198,31 @@ def _render_masui_tooltip_dg(dg, row_index: int, slot: str, segments: list, labe
         )
 
 
+def _render_source_button(container, row: dict, i: int) -> None:
+    """元データ確認ボタンを描画する。ソース情報がない場合は何も表示しない。"""
+    sources = row.get("_sources", [])
+    if not sources:
+        return
+
+    item_name = row.get("項目名", "")
+    sources_json = json.dumps(sources, ensure_ascii=False)
+    sources_b64 = base64.urlsafe_b64encode(sources_json.encode("utf-8")).decode("utf-8")
+
+    # URLエンコードされた項目名
+    import urllib.parse
+    item_encoded = urllib.parse.quote(item_name, safe="")
+
+    url = f"?page=source_viewer&item={item_encoded}&sources={sources_b64}"
+
+    # ボタンクリックでJavaScriptで新タブを開く
+    with container:
+        if st.button("📄", key=f"src_{i}", help="元データを確認"):
+            st_components.html(
+                f'<script>window.open("{url}", "_blank");</script>',
+                height=0,
+            )
+
+
 def _editable_billing_code_kubun(kubun: str) -> bool:
     """課金コードを画面上で編集できる区分（プレースホルダが出るのは主に薬剤）。"""
     return kubun in ("薬剤", "薬剤（術後鎮痛）")
@@ -205,7 +233,7 @@ def _render_santei_grid_header() -> None:
     st.markdown(
         """
 <style>
-.orbit-santei-head { display: grid; grid-template-columns: minmax(0,2.2fr) 1fr 1.2fr 1fr 1.2fr 0.85fr; gap: 0; align-items: stretch; font-size: 13px; font-weight: 600; border-bottom: 2px solid #333; margin-bottom: 4px; }
+.orbit-santei-head { display: grid; grid-template-columns: minmax(0,2.2fr) 1fr 1.2fr 1fr 1.2fr 0.7fr 0.35fr; gap: 0; align-items: stretch; font-size: 13px; font-weight: 600; border-bottom: 2px solid #333; margin-bottom: 4px; }
 .orbit-santei-head > div { padding: 8px 6px; border-top: 1px solid #bbb; border-right: 1px solid #bbb; border-bottom: 1px solid #bbb; }
 .orbit-santei-head > div:first-child { border-left: 1px solid #bbb; }
 .orbit-santei-h-desc { background: #fafafa; }
@@ -221,6 +249,7 @@ def _render_santei_grid_header() -> None:
   <div class="orbit-santei-h-sei">生食課金コード</div>
   <div class="orbit-santei-h-paste">貼り付けコード</div>
   <div class="orbit-santei-h-desc">操作</div>
+  <div class="orbit-santei-h-desc">元</div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -243,7 +272,7 @@ def _render_santei_row(
 
     with zebra_row_container(stripe_index, f"orbit_santei_{i}"):
         if row_state == "削除":
-            cols = st.columns([2.2, 1.0, 1.3, 1.0, 1.3, 1.0])
+            cols = st.columns([2.2, 1.0, 1.3, 1.0, 1.3, 0.8, 0.4])
             with cols[0]:
                 inject_colored_cell_style(f"orbit_desc_{i}", "#fafafa")
                 with st.container(key=f"orbit_desc_{i}"):
@@ -284,9 +313,10 @@ def _render_santei_row(
                         row["コード"] = row.get("システムコード", row.get("コード", ""))
                         if src_box1 is not None:
                             row["生食課金コード"] = src_box1.get("生食課金コード", "")
+            _render_source_button(cols[6], row, i)
             return
 
-        cols = st.columns([2.2, 1.0, 1.3, 1.0, 1.3, 1.0])
+        cols = st.columns([2.2, 1.0, 1.3, 1.0, 1.3, 0.8, 0.4])
 
         with cols[0]:
             inject_colored_cell_style(f"orbit_desc_{i}", "#fafafa")
@@ -398,6 +428,9 @@ def _render_santei_row(
                     st.caption("✏️ 変更")
                 elif row_state == "追加":
                     st.caption("🆕 追加")
+
+        # 元データ確認ボタン（7列目）
+        _render_source_button(cols[6], row, i)
 
 
 def _get_masui_start_time(

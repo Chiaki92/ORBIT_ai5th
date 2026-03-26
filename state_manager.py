@@ -59,6 +59,57 @@ def _save_json(path: str, data: dict):
 
 
 # =============================================================================
+# 元データ確認用ヘルパー
+# =============================================================================
+
+# サブフォルダとファイル拡張子の対応
+_SUBFOLDER_MAP = {
+    "masui_kensa": "masui_kensa",
+    "yakuzai": "yakuzai",
+    "orsys": "orsys",
+    "karte_kiji": "karte_kiji",
+}
+
+
+def _build_source_entry(row, label: str, subfolder: str) -> dict | None:
+    """
+    DataFrameの行から元データ確認用のソースエントリを構築する。
+    ファイル名がない場合はNoneを返す。
+    """
+    file_name = ""
+    if hasattr(row, "get"):
+        file_name = row.get("ファイル名", "")
+    elif isinstance(row, pd.Series) and "ファイル名" in row.index:
+        file_name = row["ファイル名"]
+
+    if pd.isna(file_name) or str(file_name).strip() == "":
+        return None
+
+    entry = {
+        "label": label,
+        "file": str(file_name),
+        "subfolder": subfolder,
+    }
+    # フェーズ2用: ページ番号・行番号・bbox座標があれば追加
+    for col, key in [
+        ("元データ_ページ番号", "page"),
+        ("元データ_行番号", "row_num"),
+    ]:
+        val = row.get(col) if hasattr(row, "get") else (row[col] if col in row.index else None)
+        if val is not None and not (isinstance(val, float) and pd.isna(val)):
+            entry[key] = int(val)
+    for col in ["元データ_bbox_x", "元データ_bbox_y", "元データ_bbox_w", "元データ_bbox_h"]:
+        val = row.get(col) if hasattr(row, "get") else (row[col] if col in row.index else None)
+        if val is not None and not (isinstance(val, float) and pd.isna(val)):
+            if "bbox" not in entry:
+                entry["bbox"] = {}
+            short_key = col.split("_")[-1]  # x, y, w, h
+            entry["bbox"][short_key] = float(val)
+
+    return entry
+
+
+# =============================================================================
 # 箱1: システム算定値の構築
 # =============================================================================
 
@@ -122,6 +173,9 @@ def build_box1(
         }
         if seg_list:
             masui_row["麻酔時間内訳"] = seg_list
+        # 元データ確認用
+        src = _build_source_entry(row, "麻酔検査レポート(PDF)", "masui_kensa")
+        masui_row["_sources"] = [src] if src else []
         rows.append(masui_row)
         counter += 1
 
@@ -129,6 +183,7 @@ def build_box1(
     patient_kensa = kensa_df[kensa_df["患者ID"] == patient_id]
     counter = 1
     for _, row in patient_kensa.iterrows():
+        src = _build_source_entry(row, "麻酔検査レポート(PDF)", "masui_kensa")
         rows.append({
             "row_id": f"kensa_{counter:03d}",
             "区分": "検査",
@@ -137,6 +192,7 @@ def build_box1(
             "数量": str(row["回数"]),
             "単位": "回",
             "生食課金コード": "",
+            "_sources": [src] if src else [],
         })
         counter += 1
 
@@ -149,6 +205,7 @@ def build_box1(
         seishoku = ""
         if "生食課金コード" in row.index and pd.notna(row.get("生食課金コード")):
             seishoku = str(row["生食課金コード"]).strip()
+        src = _build_source_entry(row, "使用薬剤レポート(PDF)", "yakuzai")
         rows.append({
             "row_id": f"drug_{counter:03d}",
             "区分": "薬剤",
@@ -157,6 +214,7 @@ def build_box1(
             "数量": str(row["請求量"]),
             "単位": str(row["請求単位"]) if pd.notna(row["請求単位"]) else "",
             "生食課金コード": seishoku,
+            "_sources": [src] if src else [],
         })
         counter += 1
 
@@ -166,6 +224,7 @@ def build_box1(
         seishoku = ""
         if "生食課金コード" in row.index and pd.notna(row.get("生食課金コード")):
             seishoku = str(row["生食課金コード"]).strip()
+        src = _build_source_entry(row, "使用薬剤レポート(PDF)", "yakuzai")
         rows.append({
             "row_id": f"drug_{counter:03d}",
             "区分": "薬剤（術後鎮痛）",
@@ -174,6 +233,7 @@ def build_box1(
             "数量": str(row["請求量"]),
             "単位": str(row["請求単位"]) if pd.notna(row["請求単位"]) else "",
             "生食課金コード": seishoku,
+            "_sources": [src] if src else [],
         })
         counter += 1
 
@@ -191,6 +251,7 @@ def build_box1(
                 if pd.isna(text) or str(text).strip() == "":
                     continue
                 text = str(text)
+                src = _build_source_entry(srow, "ORSYSデータ(CSV)", "orsys")
                 rows.append({
                     "row_id": f"star_{idx:03d}",
                     "区分": "★項目",
@@ -199,11 +260,13 @@ def build_box1(
                     "数量": text,
                     "単位": "",
                     "生食課金コード": "",
+                    "_sources": [src] if src else [],
                 })
 
     # --- ナビ（最後に追加） ---
     navi_flag = "判定不可"
     reason = ""
+    navi_sources = []
     if navi_df is not None and not navi_df.empty:
         resolved_date = surgery_date or st.session_state.get("selected_surgery_date")
         df = navi_df[navi_df["患者ID"] == patient_id] if "患者ID" in navi_df.columns else navi_df.iloc[0:0]
@@ -213,6 +276,21 @@ def build_box1(
             first = df.iloc[0]
             navi_flag = str(first.get("ナビフラグ", navi_flag))
             reason = str(first.get("判定理由", "")) if pd.notna(first.get("判定理由", "")) else ""
+            # ナビは2つのソース: header(PDF) + kiji(CSV)
+            header_file = first.get("_header_file", "")
+            if header_file and str(header_file).strip():
+                navi_sources.append({
+                    "label": "機器情報(PDF)",
+                    "file": str(header_file),
+                    "subfolder": "masui_kensa",
+                })
+            kiji_file = first.get("_kiji_file", "")
+            if kiji_file and str(kiji_file).strip():
+                navi_sources.append({
+                    "label": "記事データ(CSV)",
+                    "file": str(kiji_file),
+                    "subfolder": "karte_kiji",
+                })
 
     item_name = "ナビゲーション加算"
     if reason:
@@ -225,6 +303,7 @@ def build_box1(
         "数量": navi_flag,
         "単位": "",
         "生食課金コード": "",
+        "_sources": navi_sources,
     })
 
     return rows

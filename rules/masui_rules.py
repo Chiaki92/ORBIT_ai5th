@@ -162,6 +162,11 @@ def apply_masui_rules(df_masui_time: pd.DataFrame) -> pd.DataFrame:
     result = grouped.merge(start_times, on=["患者ID", "手術日"], how="left")
 
     # 列の並び順を整理して返す
-    result = result[["患者ID", "手術日", "名称", "コード", "合計時間", "麻酔開始時間"]]
+    base_cols = ["患者ID", "手術日", "名称", "コード", "合計時間", "麻酔開始時間"]
+    # 元データ確認用カラムがあれば追加
+    extra_cols = [c for c in ["ファイル名", "元データ_ページ番号", "元データ_行番号", "元データ_サブフォルダ",
+                              "元データ_bbox_x", "元データ_bbox_y", "元データ_bbox_w", "元データ_bbox_h"]
+                  if c in result.columns]
+    result = result[base_cols + extra_cols]
 
     return result

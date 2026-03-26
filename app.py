@@ -30,6 +30,7 @@ from views.page_patient_list import render_patient_list
 from views.page_detail import render_detail
 from views.page_output import render_output
 from views.page_upload import render_upload
+from views.page_source_viewer import render_source_viewer
 
 
 # =============================================================================
@@ -153,6 +154,12 @@ st.sidebar.metric("登録患者数", len(header_df))
 # =============================================================================
 # ページルーティング
 # =============================================================================
+
+# 元データ確認ページ（新タブで開かれた場合）
+query_params = st.query_params
+if query_params.get("page") == "source_viewer":
+    render_source_viewer()
+    st.stop()
 
 if current_page == "患者一覧":
     # 画面1: 患者一覧

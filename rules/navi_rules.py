@@ -138,11 +138,22 @@ def apply_navi_rules(header_df: pd.DataFrame, kiji_df: pd.DataFrame) -> pd.DataF
             navi_flag = "非対象"
             reason = "臨工記事なし（申込機器にナビあり）"
 
+        # 元データ確認用: headerとkijiのファイル名を保持
+        header_file = row.get("ファイル名", "") if pd.notna(row.get("ファイル名")) else ""
+        kiji_file = ""
+        if kiji_df is not None and not kiji_df.empty:
+            patient_kiji = kiji_df[kiji_df["患者ID"] == patient_id]
+            if not patient_kiji.empty and "ファイル名" in patient_kiji.columns:
+                first_file = patient_kiji["ファイル名"].iloc[0]
+                kiji_file = str(first_file) if pd.notna(first_file) else ""
+
         results.append({
             "患者ID": patient_id,
             "手術日": surgery_date,
             "ナビフラグ": navi_flag,
             "判定理由": reason,
+            "_header_file": header_file,
+            "_kiji_file": kiji_file,
         })
 
     return pd.DataFrame(results)

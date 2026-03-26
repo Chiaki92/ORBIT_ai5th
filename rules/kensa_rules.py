@@ -40,6 +40,11 @@ def apply_kensa_rules(df_kensa: pd.DataFrame) -> pd.DataFrame:
     df["コード"] = df["コード"].apply(lambda x: int(float(x)) if pd.notna(x) else 0)
 
     # --- ステップ3: 必要な列だけ選択して返す ---
-    result = df[["患者ID", "手術日", "名称", "コード", "回数"]].copy()
+    base_cols = ["患者ID", "手術日", "名称", "コード", "回数"]
+    # 元データ確認用カラムがあれば追加
+    extra_cols = [c for c in ["ファイル名", "元データ_ページ番号", "元データ_行番号", "元データ_サブフォルダ",
+                              "元データ_bbox_x", "元データ_bbox_y", "元データ_bbox_w", "元データ_bbox_h"]
+                  if c in df.columns]
+    result = df[base_cols + extra_cols].copy()
 
     return result

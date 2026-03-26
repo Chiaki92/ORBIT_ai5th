@@ -287,6 +287,52 @@ def upload_file_to_onelake(file_bytes: bytes, filename: str, subfolder: str) -> 
     return True
 
 
+def download_file_from_onelake(filename: str, subfolder: str) -> bytes | None:
+    """
+    Fabric LakehouseのFiles/raw/{subfolder}/{filename}からファイルをダウンロードする。
+
+    元データ確認機能で使用。アップロード済みのPDF/CSVを取得して
+    ブラウザ上で表示するために使う。
+
+    引数:
+      filename:   ファイル名（例: "report.pdf"）
+      subfolder:  rawフォルダ内のサブフォルダ名
+                  "yakuzai" / "masui_kensa" / "orsys" / "karte_kiji"
+
+    戻り値:
+      ファイルの内容（バイト列）。取得に失敗した場合はNone。
+    """
+    try:
+        workspace_id = _get_env_or_raise("FABRIC_WORKSPACE_ID")
+        lakehouse_id = _get_env_or_raise("FABRIC_LAKEHOUSE_ID")
+    except RuntimeError:
+        logger.warning("Fabric環境変数が未設定のため、OneLakeからのダウンロードをスキップ")
+        return None
+
+    token = get_storage_token()
+
+    base_url = "https://onelake.dfs.fabric.microsoft.com"
+    path = f"/{workspace_id}/{lakehouse_id}/Files/raw/{subfolder}/{filename}"
+    url = f"{base_url}{path}"
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        resp = requests.get(url, headers=headers)
+        if resp.status_code == 200:
+            logger.info(f"OneLakeからダウンロード完了: raw/{subfolder}/{filename} ({len(resp.content):,} bytes)")
+            return resp.content
+        else:
+            logger.warning(
+                f"OneLakeからのダウンロードに失敗: raw/{subfolder}/{filename} "
+                f"ステータス {resp.status_code}"
+            )
+            return None
+    except Exception as e:
+        logger.error(f"OneLakeダウンロードエラー: {e}")
+        return None
+
+
 # =============================================================================
 # Notebook実行トリガー
 # =============================================================================
