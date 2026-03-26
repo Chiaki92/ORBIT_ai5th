@@ -236,11 +236,11 @@ def _render_santei_grid_header() -> None:
 .orbit-santei-head { display: grid; grid-template-columns: minmax(0,2.2fr) 1fr 1.2fr 1fr 1.2fr 0.7fr 0.35fr; gap: 0; align-items: stretch; font-size: 13px; font-weight: 600; border-bottom: 2px solid #333; margin-bottom: 4px; }
 .orbit-santei-head > div { padding: 8px 6px; border-top: 1px solid #bbb; border-right: 1px solid #bbb; border-bottom: 1px solid #bbb; }
 .orbit-santei-head > div:first-child { border-left: 1px solid #bbb; }
-.orbit-santei-h-desc { background: #fafafa; }
-.orbit-santei-h-code { background: #fff9c4; }
-.orbit-santei-h-qty { background: #ffe0b2; }
-.orbit-santei-h-sei { background: #fffde7; }
-.orbit-santei-h-paste { background: #e3f2fd; border-left: 3px solid #000 !important; }
+.orbit-santei-h-desc { background: #ffffff; }
+.orbit-santei-h-code { background: #ffffff; }
+.orbit-santei-h-qty { background: #ffffff; }
+.orbit-santei-h-sei { background: #ffffff; }
+.orbit-santei-h-paste { background: #ffffff; border-left: 3px solid #000 !important; }
 </style>
 <div class="orbit-santei-head">
   <div class="orbit-santei-h-desc">↓ 貼り付け / Paste</div>
@@ -274,11 +274,11 @@ def _render_santei_row(
         if row_state == "削除":
             cols = st.columns([2.2, 1.0, 1.3, 1.0, 1.3, 0.8, 0.4])
             with cols[0]:
-                inject_colored_cell_style(f"orbit_desc_{i}", "#fafafa")
+                inject_colored_cell_style(f"orbit_desc_{i}", "#ffffff")
                 with st.container(key=f"orbit_desc_{i}"):
                     st.markdown(f"~~{html.escape(description_line(row))}~~", unsafe_allow_html=True)
             with cols[1]:
-                inject_colored_cell_style(f"orbit_code_{i}", "#fff9c4")
+                inject_colored_cell_style(f"orbit_code_{i}", "#ffffff")
                 with st.container(key=f"orbit_code_{i}"):
                     code_disp = row.get("コード", "")
                     st.markdown(
@@ -286,26 +286,26 @@ def _render_santei_row(
                         unsafe_allow_html=True,
                     )
             with cols[2]:
-                inject_colored_cell_style(f"orbit_qty_{i}", "#ffe0b2")
+                inject_colored_cell_style(f"orbit_qty_{i}", "#ffffff")
                 with st.container(key=f"orbit_qty_{i}"):
                     st.markdown(
                         f"~~システム: {html.escape(str(row['システム値']))} / 現在: {html.escape(str(row['現在値']))}~~",
                         unsafe_allow_html=True,
                     )
             with cols[3]:
-                inject_colored_cell_style(f"orbit_sei_{i}", "#fffde7")
+                inject_colored_cell_style(f"orbit_sei_{i}", "#ffffff")
                 with st.container(key=f"orbit_sei_{i}"):
                     st.markdown(
                         f"~~{html.escape(seishoku_display(row))}~~",
                         unsafe_allow_html=True,
                     )
             with cols[4]:
-                inject_colored_cell_style(f"orbit_paste_{i}", "#e3f2fd", left_border="3px solid #000")
+                inject_colored_cell_style(f"orbit_paste_{i}", "#ffffff", left_border="3px solid #000")
                 with st.container(key=f"orbit_paste_{i}"):
                     pd = paste_code_line(row) or "—"
                     st.markdown(f"~~{html.escape(pd)}~~", unsafe_allow_html=True)
             with cols[5]:
-                inject_colored_cell_style(f"orbit_act_{i}", "#fafafa")
+                inject_colored_cell_style(f"orbit_act_{i}", "#ffffff")
                 with st.container(key=f"orbit_act_{i}"):
                     if st.button("元に戻す", key=f"restore_{i}"):
                         row["状態"] = "未変更"
@@ -319,13 +319,13 @@ def _render_santei_row(
         cols = st.columns([2.2, 1.0, 1.3, 1.0, 1.3, 0.8, 0.4])
 
         with cols[0]:
-            inject_colored_cell_style(f"orbit_desc_{i}", "#fafafa")
+            inject_colored_cell_style(f"orbit_desc_{i}", "#ffffff")
             with st.container(key=f"orbit_desc_{i}"):
                 st.markdown(html.escape(description_line(row)), unsafe_allow_html=True)
 
         code_disp = row.get("コード", "")
         with cols[1]:
-            inject_colored_cell_style(f"orbit_code_{i}", "#fff9c4")
+            inject_colored_cell_style(f"orbit_code_{i}", "#ffffff")
             with st.container(key=f"orbit_code_{i}"):
                 if _editable_billing_code_kubun(row["区分"]):
                     new_code = st.text_input(
@@ -342,7 +342,7 @@ def _render_santei_row(
                     new_code = str(code_disp)
 
         with cols[2]:
-            inject_colored_cell_style(f"orbit_qty_{i}", "#ffe0b2")
+            inject_colored_cell_style(f"orbit_qty_{i}", "#ffffff")
             with st.container(key=f"orbit_qty_{i}"):
                 st.caption("システム値")
                 if row["区分"] == "麻酔" and masui_segments:
@@ -385,12 +385,12 @@ def _render_santei_row(
             paste_disp = "—"
 
         with cols[3]:
-            inject_colored_cell_style(f"orbit_sei_{i}", "#fffde7")
+            inject_colored_cell_style(f"orbit_sei_{i}", "#ffffff")
             with st.container(key=f"orbit_sei_{i}"):
                 st.markdown(html.escape(seishoku_display(row)), unsafe_allow_html=True)
 
         with cols[4]:
-            inject_colored_cell_style(f"orbit_paste_{i}", "#e3f2fd", left_border="3px solid #000")
+            inject_colored_cell_style(f"orbit_paste_{i}", "#ffffff", left_border="3px solid #000")
             with st.container(key=f"orbit_paste_{i}"):
                 st.markdown(html.escape(paste_disp), unsafe_allow_html=True)
 
@@ -409,7 +409,7 @@ def _render_santei_row(
                 row["状態"] = "未変更"
 
         with cols[5]:
-            inject_colored_cell_style(f"orbit_act_{i}", "#fafafa")
+            inject_colored_cell_style(f"orbit_act_{i}", "#ffffff")
             with st.container(key=f"orbit_act_{i}"):
                 if row_state == "修正済み":
                     if st.button("元に戻す", key=f"revert_{i}"):
