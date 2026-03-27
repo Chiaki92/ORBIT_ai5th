@@ -155,8 +155,21 @@ def _aline_judgment(h: pd.Series) -> tuple[bool, str]:
 
 
 def _navi_judgment(h: pd.Series) -> tuple[str, str]:
-    flag = _pick_value(h, ["ナビ判定", "ナビフラグ"], "判定不可")
-    reason = _pick_value(h, ["ナビ判定理由", "判定理由"], "")
+    raw_flag = _pick_value(h, ["ナビゲーション判定", "ナビ判定", "ナビフラグ"], "")
+    normalized = str(raw_flag).strip()
+    if normalized in ("対象",):
+        flag = "対象"
+    elif normalized in ("対象外", "非対象"):
+        flag = "対象外"
+    elif normalized:
+        # 想定外の表記ゆれは「対象外」に丸める
+        flag = "対象外"
+    else:
+        # 仕様上は対象/対象外の2択。空値は対象外扱いにする。
+        flag = "対象外"
+    reason = _pick_value(h, ["ナビゲーション根拠", "ナビ判定理由", "判定理由"], "")
+    if not reason and raw_flag in ("", "判定不可"):
+        reason = "ナビ判定データ未連携"
     return flag, (reason or "判定理由なし")
 
 
@@ -167,7 +180,7 @@ def _badge_html(label: str, css: str) -> str:
 def _render_judgments(h: pd.Series) -> bool:
     aline_flag, aline_reason = _aline_judgment(h)
     navi_flag, navi_reason = _navi_judgment(h)
-    navi_css = "target" if navi_flag == "対象" else ("no" if navi_flag == "非対象" else "unknown")
+    navi_css = "target" if navi_flag == "対象" else ("no" if navi_flag == "対象外" else "unknown")
     aline_html = _badge_html("あり" if aline_flag else "なし", "yes" if aline_flag else "no")
     navi_html = _badge_html(navi_flag, navi_css)
     with st.expander("判定項目", expanded=True):
@@ -269,8 +282,14 @@ def _to_box1_rows(
         })
         counter += 1
 
-    navi_flag = _pick_value(header_row, ["ナビ判定", "ナビフラグ"], "判定不可")
-    navi_reason = _pick_value(header_row, ["ナビ判定理由", "判定理由"], "")
+    raw_navi_flag = _pick_value(header_row, ["ナビゲーション判定", "ナビ判定", "ナビフラグ"], "")
+    if str(raw_navi_flag).strip() in ("対象",):
+        navi_flag = "対象"
+    else:
+        navi_flag = "対象外"
+    navi_reason = _pick_value(header_row, ["ナビゲーション根拠", "ナビ判定理由", "判定理由"], "")
+    if not navi_reason and raw_navi_flag in ("", "判定不可"):
+        navi_reason = "ナビ判定データ未連携"
     item_name = f"ナビゲーション加算（{navi_reason}）" if navi_reason else "ナビゲーション加算"
     rows.append({
         "row_id": "navi_001",
@@ -286,11 +305,9 @@ def _to_box1_rows(
 
 def _render_masui_section(box2: list[dict]) -> None:
     masui_rows = [r for r in box2 if r.get("区分") == "麻酔" and r.get("状態") != "削除"]
-    for r in masui_rows:
-        r["貼り付けコード"] = paste_code_line(r)
     with st.expander("麻酔時間", expanded=True):
         st.dataframe(
-            _to_table_df(masui_rows, ["項目名", "コード", "現在値", "単位", "貼り付けコード"]),
+            _to_table_df(masui_rows, ["項目名", "コード", "現在値", "単位"]),
             use_container_width=True,
             hide_index=True,
         )
@@ -321,14 +338,24 @@ def _render_drug_section(box2: list[dict], patient_id: int) -> list[dict]:
             rows = by_cat.get(cat, [])
             base = []
             for r in rows:
+                paste_code = paste_code_line(
+                    {
+                        "区分": r.get("区分", ""),
+                        "コード": r.get("システムコード", r.get("コード", "")),
+                        "現在値": r.get("システム値", r.get("現在値", "")),
+                        "単位": r.get("単位", ""),
+                        "生食課金コード": r.get("生食課金コード", ""),
+                    }
+                )
                 base.append(
                     {
-                        "row_id": r.get("row_id", ""),
+                        "_row_id": r.get("row_id", ""),
                         "薬品名": r.get("項目名", ""),
                         "課金コード": r.get("コード", ""),
                         "使用量": r.get("現在値", ""),
                         "単位": r.get("単位", ""),
                         "生食課金コード": r.get("生食課金コード", ""),
+                        "貼り付けコード": paste_code,
                         "_status": r.get("状態", "未変更"),
                         "_system_value": r.get("システム値", r.get("現在値", "")),
                         "_system_code": r.get("システムコード", r.get("コード", "")),
@@ -336,7 +363,7 @@ def _render_drug_section(box2: list[dict], patient_id: int) -> list[dict]:
                 )
             base_df = pd.DataFrame(base)
             if base_df.empty:
-                base_df = pd.DataFrame(columns=["row_id", "薬品名", "課金コード", "使用量", "単位", "生食課金コード", "_status", "_system_value", "_system_code"])
+                base_df = pd.DataFrame(columns=["_row_id", "薬品名", "課金コード", "使用量", "単位", "生食課金コード", "貼り付けコード", "_status", "_system_value", "_system_code"])
 
             edited_df = st.data_editor(
                 base_df,
@@ -344,23 +371,21 @@ def _render_drug_section(box2: list[dict], patient_id: int) -> list[dict]:
                 use_container_width=True,
                 hide_index=True,
                 num_rows="dynamic",
+                column_order=["薬品名", "課金コード", "使用量", "単位", "生食課金コード", "貼り付けコード"],
                 column_config={
-                    "row_id": st.column_config.TextColumn("row_id", disabled=True),
                     "薬品名": st.column_config.TextColumn("薬品名"),
                     "課金コード": st.column_config.TextColumn("課金コード"),
                     "使用量": st.column_config.TextColumn("使用量"),
                     "単位": st.column_config.TextColumn("単位"),
                     "生食課金コード": st.column_config.TextColumn("生食課金コード"),
-                    "_status": st.column_config.TextColumn("_status", disabled=True),
-                    "_system_value": st.column_config.TextColumn("_system_value", disabled=True),
-                    "_system_code": st.column_config.TextColumn("_system_code", disabled=True),
+                    "貼り付けコード": st.column_config.TextColumn("貼り付けコード", disabled=True),
                 },
-                disabled=["row_id", "_status", "_system_value", "_system_code"],
+                disabled=["貼り付けコード"],
             )
             edited_rows = edited_df.to_dict("records")
             seen_postop = False
             for er in edited_rows:
-                row_id = str(er.get("row_id", "")).strip() or f"added_{uuid.uuid4().hex[:8]}"
+                row_id = str(er.get("_row_id", "")).strip() or f"added_{uuid.uuid4().hex[:8]}"
                 is_new = not any(str(r.get("row_id", "")) == row_id for r in rows)
                 kubun = "薬剤"
                 if cat == "術後鎮痛薬":
