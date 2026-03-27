@@ -11,21 +11,11 @@ import streamlit as st
 
 # --- データ読み込みモジュール ---
 from data_loader import (
-    load_header,
-    load_masui_time,
-    load_kensa,
-    load_drugs,
-    load_seishoku_master,
-    load_aline_master,
-    load_star_items,
-    load_kiji,
+    load_surgery_summary,
+    load_drug_items,
+    load_anesthesia_times,
+    load_exam_items,
 )
-
-# --- 算定ルールモジュール ---
-from rules.masui_rules import apply_masui_rules
-from rules.kensa_rules import apply_kensa_rules
-from rules.drug_rules import apply_drug_rules
-from rules.navi_rules import apply_navi_rules
 
 # --- 状態管理モジュール ---
 from state_manager import get_patient_status
@@ -203,27 +193,13 @@ if query_params.get("page") == "source_viewer":
 
 
 # =============================================================================
-# データの読み込み（キャッシュ済み）
+# データの読み込み（キャッシュ済み / Gold）
 # =============================================================================
 
-header_df = load_header()
-masui_time_df = load_masui_time()
-kensa_df = load_kensa()
-drugs_df = load_drugs()
-star_items_df = load_star_items()
-kiji_df = load_kiji()
-seishoku_master = load_seishoku_master()
-aline_master = load_aline_master()
-
-
-# =============================================================================
-# 算定ルールの適用
-# =============================================================================
-
-masui_processed = apply_masui_rules(masui_time_df)
-kensa_processed = apply_kensa_rules(kensa_df)
-drugs_processed = apply_drug_rules(drugs_df, seishoku_master)
-navi_result = apply_navi_rules(header_df, kiji_df)
+header_df = load_surgery_summary()
+drug_items_df = load_drug_items()
+anesthesia_times_df = load_anesthesia_times()
+exam_items_df = load_exam_items()
 
 
 # =============================================================================
@@ -310,50 +286,60 @@ with st.sidebar:
                 )
 
             if st.button("📤 アップロード実行", use_container_width=True, type="primary"):
-                if is_fabric_available():
-                    with st.spinner("アップロード中..."):
-                        for f, subfolder in all_uploaded:
-                            upload_file_to_onelake(f.getvalue(), f.name, subfolder)
-                    st.success("アップロード完了")
-                else:
+                if not is_fabric_available():
                     st.error("Fabric環境変数が未設定です。")
+                    st.stop()
+                with st.status("アップロード中...", expanded=True) as status:
+                    try:
+                        for f, subfolder in all_uploaded:
+                            data = f.getvalue()
+                            upload_file_to_onelake(data, f.name, subfolder)
+                            st.write(f"✅ OneLakeへアップロード: raw/{subfolder}/{f.name}（{len(data):,} bytes）")
+                        status.update(label="アップロード完了", state="complete")
+                    except Exception as e:
+                        status.update(label="アップロード失敗", state="error")
+                        st.error(f"アップロードに失敗しました: {e}")
+                        st.stop()
+                st.success("アップロード完了")
 
     st.divider()
 
     # --- パイプライン実行 ---
     if st.button("▶ パイプライン実行", use_container_width=True, type="primary"):
-        if is_fabric_available():
-            st.session_state["pipeline_status"] = "running"
-            st.rerun()
-        else:
+        if not is_fabric_available():
             st.error("Fabric環境変数が未設定です。")
+        else:
+            with st.status("パイプラインを実行中...", expanded=True) as status:
+                try:
+                    steps = [
+                        ("NOTEBOOK_YAKUZAI_ID", "使用薬剤Notebook", trigger_notebook),
+                        ("NOTEBOOK_MASUI_KENSA_ID", "麻酔検査Notebook", trigger_notebook),
+                        ("NOTEBOOK_CSV_IMPORT_ID", "CSV取り込みNotebook", trigger_notebook),
+                        ("DATAFLOW_ID", "Dataflow Gen2", trigger_dataflow),
+                    ]
+                    for env_key, label, trigger_fn in steps:
+                        item_id = os.environ.get(env_key, "")
+                        if not item_id:
+                            st.write(f"⏭️ {label} — スキップ（{env_key} 未設定）")
+                            continue
+                        st.write(f"▶ {label} を開始...")
+                        loc = trigger_fn(item_id)
+                        wait_for_job(loc)
+                        st.write(f"✅ {label} 完了")
+
+                    status.update(label="パイプライン完了", state="complete")
+                    st.session_state["pipeline_status"] = "done"
+                    st.cache_data.clear()
+                except Exception as e:
+                    status.update(label="パイプライン失敗", state="error")
+                    st.session_state["pipeline_status"] = "error"
+                    st.error(f"パイプラインエラー: {e}")
+                    st.stop()
+            st.rerun()
 
     # パイプラインステータス表示
     pipeline_st = st.session_state.get("pipeline_status", "idle")
-    if pipeline_st == "running":
-        st.markdown(
-            '<div class="pipeline-status pipeline-running">'
-            '<span>●</span> 実行中 — Bronze → Silver → Gold...</div>',
-            unsafe_allow_html=True,
-        )
-        try:
-            for env_key, trigger_fn in [
-                ("NOTEBOOK_YAKUZAI_ID", trigger_notebook),
-                ("NOTEBOOK_MASUI_KENSA_ID", trigger_notebook),
-                ("NOTEBOOK_CSV_IMPORT_ID", trigger_notebook),
-                ("DATAFLOW_ID", trigger_dataflow),
-            ]:
-                item_id = os.environ.get(env_key, "")
-                if item_id:
-                    loc = trigger_fn(item_id)
-                    wait_for_job(loc)
-            st.session_state["pipeline_status"] = "done"
-            st.cache_data.clear()
-            st.rerun()
-        except Exception as e:
-            st.session_state["pipeline_status"] = "error"
-            st.error(f"パイプラインエラー: {e}")
-    elif pipeline_st == "done":
+    if pipeline_st == "done":
         st.markdown(
             '<div class="pipeline-status pipeline-done">'
             f'<span>●</span> 完了 — {len(header_df)}件処理済み</div>',
@@ -430,11 +416,7 @@ if "selected_patient_id" not in st.session_state and not header_df.empty:
 # メイン画面の描画
 render_detail(
     header_df=header_df,
-    masui_processed=masui_processed,
-    kensa_processed=kensa_processed,
-    drugs_processed=drugs_processed,
-    star_items_df=star_items_df,
-    navi_df=navi_result,
-    masui_time_raw_df=masui_time_df,
-    aline_master=aline_master,
+    anesthesia_times_df=anesthesia_times_df,
+    exam_items_df=exam_items_df,
+    drug_items_df=drug_items_df,
 )

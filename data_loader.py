@@ -1,31 +1,13 @@
 """
-data_loader.py — データ読み込み（Fabric SQL）
-
-Fabricテーブルからデータを読み込む。
-関数のインターフェース（引数・戻り値）は変えないこと。
+data_loader.py — データ読み込み（Fabric SQL / Gold）
 """
 
-import os
 import logging
-
-import pandas as pd
 import streamlit as st
 
 from fabric_connection import read_table
 
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# マスターデータのパス設定
-# =============================================================================
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MASTERS_DIR = os.path.join(BASE_DIR, "masters")
-
-
-# =============================================================================
-# 前処理用のヘルパー関数
-# =============================================================================
 
 def normalize_patient_id(val) -> int:
     """
@@ -50,7 +32,7 @@ def normalize_surgery_date(val) -> str:
       "2026/01/01(木)" → "2026/01/01"
       "2026/01/01"     → "2026/01/01"（そのまま）
     """
-    if pd.isna(val):
+    if val is None:
         return ""
     s = str(val)
     # 曜日が括弧付きで含まれる場合、括弧より前の部分だけ取り出す
@@ -61,7 +43,7 @@ def normalize_surgery_date(val) -> str:
     return s.strip()
 
 
-def _common_preprocess(df: pd.DataFrame) -> pd.DataFrame:
+def _common_preprocess(df):
     """
     全テーブル共通の前処理を行う。
     1. 「取込日時」列があれば削除（「ファイル名」は元データ確認用に保持）
@@ -85,11 +67,7 @@ def _common_preprocess(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# =============================================================================
-# Fabric読み込みヘルパー
-# =============================================================================
-
-def _read_from_fabric(table_name: str) -> pd.DataFrame:
+def _read_from_fabric(table_name: str):
     """
     Fabricテーブルからデータを読み込み、共通前処理を適用する。
     列名 `手術日_統一` は下流互換のため `手術日` にリネームする。
@@ -101,60 +79,25 @@ def _read_from_fabric(table_name: str) -> pd.DataFrame:
     return df
 
 
-# =============================================================================
-# データ読み込み関数
-# =============================================================================
-
 @st.cache_data
-def load_header() -> pd.DataFrame:
-    """患者基本情報を取得する（1手術=1行）。"""
-    return _read_from_fabric("silver_masui_kensa_header")
+def load_surgery_summary():
+    """患者一覧 + 判定結果（gold_surgery_summary）を取得する。"""
+    return _read_from_fabric("gold_surgery_summary")
 
 
 @st.cache_data
-def load_masui_time() -> pd.DataFrame:
-    """麻酔時間データを取得する。"""
-    return _read_from_fabric("silver_masui_kensa_masui_time")
+def load_drug_items():
+    """薬剤 + 動脈ライン + ★項目（gold_drug_items）を取得する。"""
+    return _read_from_fabric("gold_drug_items")
 
 
 @st.cache_data
-def load_kensa() -> pd.DataFrame:
-    """検査データを取得する。"""
-    return _read_from_fabric("silver_masui_kensa_kensa")
+def load_anesthesia_times():
+    """麻酔時間（合算済み + 時間帯 + 根拠）（gold_anesthesia_times）を取得する。"""
+    return _read_from_fabric("gold_anesthesia_times")
 
 
 @st.cache_data
-def load_drugs() -> pd.DataFrame:
-    """薬剤データを取得する。"""
-    return _read_from_fabric("silver_yakuzai_drugs")
-
-
-@st.cache_data
-def load_star_items() -> pd.DataFrame:
-    """★コスト項目（silver_orsys_star_items）を取得する。"""
-    return _read_from_fabric("silver_orsys_star_items")
-
-
-@st.cache_data
-def load_kiji() -> pd.DataFrame:
-    """ナビ判定用（silver_kiji_n_pn_head）を取得する。"""
-    df = read_table("silver_kiji_n_pn_head")
-    if "患者ID" in df.columns:
-        df["患者ID"] = df["患者ID"].apply(normalize_patient_id)
-    return df
-
-
-@st.cache_data
-def load_seishoku_master() -> pd.DataFrame:
-    """生食課金コード変換マスターを取得する。"""
-    path = os.path.join(MASTERS_DIR, "seishoku_master.csv")
-    df = pd.read_csv(path, encoding="utf-8-sig")
-    return df
-
-
-@st.cache_data
-def load_aline_master() -> pd.DataFrame:
-    """Aライン追加課金マスターを取得する。"""
-    path = os.path.join(MASTERS_DIR, "aline_master.csv")
-    df = pd.read_csv(path, encoding="utf-8-sig")
-    return df
+def load_exam_items():
+    """検査コード + 回数（gold_exam_items）を取得する。"""
+    return _read_from_fabric("gold_exam_items")
