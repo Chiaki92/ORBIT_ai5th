@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from fabric_connection import download_file_from_onelake
 from state_manager import (
     confirm_patient,
     get_box2,
@@ -23,6 +24,35 @@ from state_manager import (
 from views.santei_format import paste_code_line
 
 DRUG_CATEGORY_ORDER = ["麻酔薬", "術後鎮痛薬", "注射薬", "その他薬剤", "Aライン", "★項目"]
+
+
+@st.cache_data(show_spinner=False)
+def _download_orbit_sheet_bytes() -> bytes | None:
+    """Files/export の ORBIT_算定シート.xlsx を取得する。"""
+    return download_file_from_onelake(
+        filename="ORBIT_算定シート.xlsx",
+        subfolder="",
+        folder="export",
+    )
+
+
+def _render_detail_header() -> None:
+    """算定明細タイトルと算定シートDLボタンを横並びで表示する。"""
+    title_col, button_col = st.columns([0.7, 0.3])
+    with title_col:
+        st.subheader("算定明細")
+
+    orbit_sheet_bytes = _download_orbit_sheet_bytes()
+    with button_col:
+        st.download_button(
+            label="ORBIT_算定シート（Excel）をダウンロード",
+            data=orbit_sheet_bytes or b"",
+            file_name="ORBIT_算定シート.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            disabled=orbit_sheet_bytes is None,
+            use_container_width=True,
+            help=None if orbit_sheet_bytes else "Files/export にファイルが見つかりません。",
+        )
 
 
 def _inject_detail_styles() -> None:
@@ -493,7 +523,7 @@ def render_detail(
     exam_items_df: pd.DataFrame,
     drug_items_df: pd.DataFrame,
 ) -> None:
-    st.subheader("算定明細")
+    _render_detail_header()
     if header_df is None or header_df.empty:
         st.warning("患者データがありません。")
         return
