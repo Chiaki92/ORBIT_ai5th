@@ -383,7 +383,7 @@ with st.sidebar:
         st.info("データがありません。")
 
     if not header_df.empty:
-        for _, row in header_df.iterrows():
+        for row_idx, (_, row) in enumerate(header_df.iterrows()):
             pid = row["患者ID"]
             name = str(row.get("患者氏名", "")).strip() or f"患者{pid}"
             date = str(row.get("手術日", "")).strip()
@@ -403,7 +403,7 @@ with st.sidebar:
             with col_btn:
                 label = f"{'▸ ' if is_selected else ''}{name}（{pid}）"
                 if st.button(
-                    label, key=f"pt_{pid}_{date}",
+                    label, key=f"pt_{row_idx}_{pid}_{date}",
                     use_container_width=True,
                     type="primary" if is_selected else "secondary",
                 ):
