@@ -82,7 +82,11 @@ def _read_from_fabric(table_name: str):
 @st.cache_data
 def load_surgery_summary():
     """患者一覧 + 判定結果（gold_surgery_summary）を取得する。"""
-    return _read_from_fabric("gold_surgery_summary")
+    df = _read_from_fabric("gold_surgery_summary")
+    # 患者一覧は「患者ID + 手術日」を一意キーとして扱うため重複行を除外する
+    if not df.empty and {"患者ID", "手術日"}.issubset(df.columns):
+        df = df.drop_duplicates(subset=["患者ID", "手術日"], keep="first").reset_index(drop=True)
+    return df
 
 
 @st.cache_data

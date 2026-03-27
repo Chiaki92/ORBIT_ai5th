@@ -266,8 +266,8 @@ with st.sidebar:
 
     st.divider()
 
-    # --- PDFアップロード ---
-    with st.expander("📂 PDFアップロード", expanded=False):
+    # --- PDF/CSVアップロード ---
+    with st.expander("📂 PDF/CSVアップロード", expanded=False):
         yakuzai_files = st.file_uploader(
             "使用薬剤レポート (PDF)", type=["pdf"],
             accept_multiple_files=True, key="upload_yakuzai",
@@ -325,8 +325,8 @@ with st.sidebar:
 
     st.divider()
 
-    # --- パイプライン実行 ---
-    if st.button("▶ パイプライン実行", use_container_width=True, type="primary"):
+    # --- 実行 ---
+    if st.button("▶ 実行", use_container_width=True, type="primary"):
         if not is_fabric_available():
             st.error("Fabric環境変数が未設定です。")
         else:
