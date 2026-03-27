@@ -33,6 +33,10 @@ def render_source_viewer():
     item_name = params.get("item", "（不明）")
     sources_b64 = params.get("sources", "")
 
+    if st.button("← トップに戻る"):
+        st.query_params.clear()
+        st.rerun()
+
     st.title("元データ確認")
     st.markdown(f"**項目:** {item_name}")
 
