@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORBIT — 手術薬剤コスト算定</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F6F5F2;
+    --surface: #FFFFFF;
+    --surface-alt: #F0EFEC;
+    --border: #DDD9D1;
+    --border-light: #ECEAE5;
+    --text: #1A1917;
+    --text-secondary: #6B6860;
+    --text-muted: #9E9B93;
+    --accent: #1A6B4E;
+    --accent-light: #E6F3ED;
+    --accent-hover: #14543D;
+    --blue: #2563EB;
+    --blue-light: #EFF6FF;
+    --orange: #C2410C;
+    --orange-light: #FFF7ED;
+    --red: #991B1B;
+    --copy-flash: #10B981;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
+    --radius: 6px;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: 'IBM Plex Sans JP', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  /* ── Layout ── */
+  .app { display: flex; height: 100vh; overflow: hidden; position: relative; }
+
+  .sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.12);
+  }
+
+  .sidebar.open { transform: translateX(0); }
+
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 150;
+  }
+
+  .sidebar-overlay.show { display: block; }
+
+  .main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 60px 16px 24px;
+    width: 100%;
+  }
+
+  /* Top bar */
+  .topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 48px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    z-index: 100;
+    gap: 10px;
+  }
+
+  .menu-btn {
+    width: 36px; height: 36px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: var(--text);
+    flex-shrink: 0;
+  }
+
+  .topbar-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 1.5px;
+  }
+
+  .topbar-patient {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-left: auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sidebar-close {
+    position: absolute;
+    top: 12px; right: 12px;
+    width: 32px; height: 32px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 16px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  @media (min-width: 768px) {
+    .sidebar {
+      position: relative;
+      transform: none;
+      box-shadow: none;
+    }
+    .sidebar.open { transform: none; }
+    .sidebar-overlay { display: none !important; }
+    .topbar { display: none; }
+    .main { padding: 24px 32px; }
+    .sidebar-close { display: none; }
+  }
+
+  /* ── Sidebar ── */
+  .sidebar-header {
+    padding: 24px 16px 12px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .sidebar-header h1 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--accent);
+  }
+
+  .sidebar-header p {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .sidebar-section {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .sidebar-section-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  /* Upload area */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 20px 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--surface-alt);
+  }
+
+  .upload-zone:hover {
+    border-color: var(--accent);
+    background: var(--accent-light);
+  }
+
+  .upload-zone .icon { font-size: 24px; margin-bottom: 6px; }
+  .upload-zone .label { font-size: 12px; color: var(--text-secondary); }
+  .upload-zone .hint { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+
+  .uploaded-file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--accent-light);
+    border-radius: var(--radius);
+    margin-top: 8px;
+    font-size: 11px;
+  }
+
+  .uploaded-file .name { flex:1; font-weight: 500; color: var(--accent); }
+  .uploaded-file .size { color: var(--text-muted); }
+
+  /* Buttons */
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 10px 14px;
+    border: none;
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+
+  .btn-outline {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  .btn-outline:hover { background: var(--accent-light); }
+
+  .btn-run {
+    background: var(--blue);
+    color: #fff;
+    margin-top: 8px;
+  }
+  .btn-run:hover { background: #1D4ED8; }
+
+  .btn-sm {
+    padding: 5px 10px;
+    font-size: 11px;
+    width: auto;
+  }
+
+  /* Pipeline status */
+  .pipeline-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    font-size: 11px;
+    margin-top: 8px;
+  }
+
+  .pipeline-status.idle { background: var(--surface-alt); color: var(--text-muted); }
+  .pipeline-status.running { background: var(--blue-light); color: var(--blue); }
+  .pipeline-status.done { background: var(--accent-light); color: var(--accent); }
+
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .status-dot.running {
+    animation: pulse 1.2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* Patient list */
+  .patient-list { list-style: none; }
+
+  .patient-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.12s;
+    border: 1px solid transparent;
+  }
+
+  .patient-item:hover { background: var(--surface-alt); }
+
+  .patient-item.active {
+    background: var(--accent-light);
+    border-color: var(--accent);
+  }
+
+  .patient-item .pid {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  .patient-item .pname {
+    font-weight: 500;
+    font-size: 12px;
+  }
+
+  .patient-item .meta {
+    font-size: 10px;
+    color: var(--text-secondary);
+  }
+
+  .patient-item .status-badge {
+    margin-left: auto;
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  .status-badge.confirmed { background: var(--accent-light); color: var(--accent); }
+  .status-badge.pending { background: var(--orange-light); color: var(--orange); }
+
+  /* ── Main content ── */
+  .sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+
+  .sheet-title {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .sheet-title span {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 13px;
+    margin-left: 8px;
+  }
+
+  .sheet-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  /* Section blocks */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: var(--surface-alt);
+    border-bottom: 1px solid var(--border-light);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .section-title .chevron {
+    font-size: 10px;
+    transition: transform 0.2s;
+    color: var(--text-muted);
+  }
+
+  .section-body { padding: 12px 16px; }
+
+  /* Info grid */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0;
+  }
+
+  .info-item {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-light);
+    border-right: 1px solid var(--border-light);
+  }
+
+  .info-item:nth-child(5n) { border-right: none; }
+
+  .info-label {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .info-value {
+    font-size: 12px;
+    font-weight: 500;
+    margin-top: 1px;
+  }
+
+  .info-item.wide { grid-column: span 2; }
+  .info-item.full { grid-column: 1 / -1; }
+
+  /* Tables */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .data-table th {
+    text-align: left;
+    padding: 6px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+
+  .data-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-light);
+    vertical-align: top;
+  }
+
+  .data-table tr:last-child td { border-bottom: none; }
+
+  .data-table .code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--blue);
+  }
+
+  .data-table .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    text-align: right;
+  }
+
+  /* Category row */
+  .cat-row td {
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--surface-alt);
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  /* Editable cell */
+  .editable {
+    position: relative;
+  }
+
+  .editable input {
+    width: 100%;
+    border: 1px solid transparent;
+    background: transparent;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    color: var(--text);
+    text-align: right;
+  }
+
+  .editable input:hover { border-color: var(--border); }
+  .editable input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--accent-light);
+  }
+
+  /* 貼り付けコード column */
+  .paste-code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text);
+    background: var(--surface-alt);
+    padding: 2px 6px;
+    border-radius: 3px;
+    display: inline-block;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: 1px solid transparent;
+    user-select: all;
+  }
+
+  .paste-code:hover {
+    background: var(--accent-light);
+    border-color: var(--accent);
+  }
+
+  /* Copy all bar */
+  .copy-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #1E293B;
+    border-radius: var(--radius);
+    margin-top: 12px;
+  }
+
+  .copy-bar .preview {
+    flex: 1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #94A3B8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .btn-copy {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 14px;
+    background: var(--copy-flash);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+
+  .btn-copy:hover { background: #059669; }
+
+  .btn-copy.copied {
+    background: #065F46;
+  }
+
+  /* Judgment section */
+  .judgment-row {
+    display: flex;
+    gap: 16px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .judgment-row:last-child { border-bottom: none; }
+
+  .judgment-label {
+    font-weight: 600;
+    font-size: 12px;
+    min-width: 140px;
+  }
+
+  .judgment-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 10px;
+    min-width: 48px;
+    text-align: center;
+  }
+
+  .judgment-badge.yes { background: var(--accent-light); color: var(--accent); }
+  .judgment-badge.no { background: var(--surface-alt); color: var(--text-muted); }
+  .judgment-badge.target { background: var(--blue-light); color: var(--blue); }
+
+  .judgment-reason {
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex: 1;
+    line-height: 1.5;
+  }
+
+  /* Add row */
+  .add-row-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    margin: 8px 0 4px 8px;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+
+  .add-row-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-light);
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #1E293B;
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: var(--radius);
+    font-size: 12px;
+    font-weight: 500;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.3s ease;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .toast.show {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  /* Confirm bar */
+  .confirm-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--border);
+    margin-top: 16px;
+  }
+
+  .confirm-bar .note {
+    flex: 1;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* Section: kensa */
+  .kensa-table th:first-child, .kensa-table td:first-child { min-width: 200px; }
+
+  /* Mobile table scroll */
+  @media (max-width: 767px) {
+    .section-body { overflow-x: auto; }
+    .data-table { min-width: 560px; }
+    .info-grid { grid-template-columns: repeat(2, 1fr); }
+    .info-item.wide { grid-column: span 2; }
+    .info-item.full { grid-column: 1 / -1; }
+    .sheet-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .confirm-bar { flex-direction: column; align-items: stretch; }
+    .confirm-bar .note { margin-bottom: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Top bar (mobile) -->
+  <div class="topbar">
+    <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+    <span class="topbar-title">ORBIT</span>
+    <span class="topbar-patient">テスト 太郎 / 10000000</span>
+  </div>
+
+  <!-- Overlay -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+  <!-- ===== Sidebar ===== -->
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
+    <div class="sidebar-header">
+      <h1>ORBIT</h1>
+      <p>手術薬剤コスト算定システム</p>
+    </div>
+
+    <!-- Upload -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">PDF アップロード</div>
+      <div class="upload-zone" id="uploadZone">
+        <div class="icon">📄</div>
+        <div class="label">ドラッグ＆ドロップ</div>
+        <div class="hint">または クリックしてファイルを選択</div>
+      </div>
+      <div class="uploaded-file" style="margin-top:8px">
+        <span>📄</span>
+        <span class="name">masui_kensa_20260101.pdf</span>
+        <span class="size">1.2MB</span>
+      </div>
+      <div class="uploaded-file">
+        <span>📄</span>
+        <span class="name">yakuzai_20260101.pdf</span>
+        <span class="size">840KB</span>
+      </div>
+    </div>
+
+    <!-- Pipeline -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">パイプライン実行</div>
+      <button class="btn btn-run" onclick="runPipeline()">▶ パイプライン実行</button>
+      <div class="pipeline-status done" id="pipelineStatus">
+        <span class="status-dot"></span>
+        <span>完了 — 5件処理済み（12秒）</span>
+      </div>
+    </div>
+
+    <!-- Patient list -->
+    <div class="sidebar-section" style="flex:1; border-bottom:none;">
+      <div class="sidebar-section-title">患者一覧（2026/01/01）</div>
+      <ul class="patient-list">
+        <li class="patient-item active" onclick="selectPatient(this)">
+          <div>
+            <div class="pname">テスト 太郎</div>
+            <div class="pid">10000000</div>
+            <div class="meta">耳鼻科／咽頭喉頭頸部食道切除</div>
+          </div>
+          <span class="status-badge confirmed">確認済</span>
+        </li>
+        <li class="patient-item" onclick="selectPatient(this)">
+          <div>
+            <div class="pname">山田 テスト</div>
+            <div class="pid">10000007</div>
+            <div class="meta">心臓血管外科／冠動脈バイパス術</div>
+          </div>
+          <span class="status-badge pending">確認待</span>
+        </li>
+        <li class="patient-item" onclick="selectPatient(this)">
+          <div>
+            <div class="pname">テスト 三郎</div>
+            <div class="pid">1000002</div>
+            <div class="meta">呼吸器外科／胸腔鏡下右下葉S6区域切除</div>
+          </div>
+          <span class="status-badge pending">確認待</span>
+        </li>
+        <li class="patient-item" onclick="selectPatient(this)">
+          <div>
+            <div class="pname">テスト 次郎</div>
+            <div class="pid">1000001</div>
+            <div class="meta">耳鼻科／扁桃周囲膿瘍切開排膿術</div>
+          </div>
+          <span class="status-badge pending">確認待</span>
+        </li>
+        <li class="patient-item" onclick="selectPatient(this)">
+          <div>
+            <div class="pname">テスト 花子</div>
+            <div class="pid">10000001</div>
+            <div class="meta">耳鼻科／両ESSⅣ型</div>
+          </div>
+          <span class="status-badge pending">確認待</span>
+        </li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <main class="main">
+    <!-- Header -->
+    <div class="sheet-header">
+      <div class="sheet-title">
+        テスト 太郎 <span>ID: 10000000　／　2026/01/01</span>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn btn-outline btn-sm" onclick="exportExcel()">⬇ Excel出力</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmSheet()">✓ 確定</button>
+      </div>
+    </div>
+
+    <!-- 基本情報 -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">
+        <span class="chevron">▼</span> 基本情報
+      </div>
+      <div class="section-body">
+        <div class="info-grid">
+          <div class="info-item"><div class="info-label">患者ID</div><div class="info-value" style="font-family:'JetBrains Mono',monospace">10000000</div></div>
+          <div class="info-item"><div class="info-label">患者氏名</div><div class="info-value">テスト 太郎</div></div>
+          <div class="info-item"><div class="info-label">性別</div><div class="info-value">男</div></div>
+          <div class="info-item"><div class="info-label">年齢</div><div class="info-value">61歳</div></div>
+          <div class="info-item"><div class="info-label">生年月日</div><div class="info-value">1964/08/01</div></div>
+          <div class="info-item"><div class="info-label">手術日</div><div class="info-value">2026/01/01</div></div>
+          <div class="info-item"><div class="info-label">診療科</div><div class="info-value">耳鼻科／形成外科／外科</div></div>
+          <div class="info-item"><div class="info-label">手術室</div><div class="info-value">318</div></div>
+          <div class="info-item"><div class="info-label">病棟</div><div class="info-value">３－１０</div></div>
+          <div class="info-item"><div class="info-label">予定区分</div><div class="info-value">予定</div></div>
+          <div class="info-item full"><div class="info-label">確定術式</div><div class="info-value">咽頭喉頭頸部食道切除</div></div>
+          <div class="info-item full"><div class="info-label">確定病名</div><div class="info-value">下咽頭癌(20055085)</div></div>
+          <div class="info-item wide"><div class="info-label">手術時間</div><div class="info-value">09:38 ～ 20:52（11時間14分）</div></div>
+          <div class="info-item wide"><div class="info-label">麻酔時間</div><div class="info-value">08:38 ～ 21:30（12時間52分）</div></div>
+          <div class="info-item"><div class="info-label">入院外来</div><div class="info-value">入院</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 判定項目 -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">
+        <span class="chevron">▼</span> 判定項目
+      </div>
+      <div class="section-body">
+        <div class="judgment-row">
+          <div class="judgment-label">Aライン判定</div>
+          <span class="judgment-badge yes">あり</span>
+          <div class="judgment-reason">ライン項目「動脈-右-橈骨-ガイドワイヤー付-22G-㎝」あり ＋ センター部門入室確認 → ラクトリンゲル＋ヘパNa＋ヘパロック（3薬剤）算定</div>
+        </div>
+        <div class="judgment-row">
+          <div class="judgment-label">ナビゲーション判定</div>
+          <span class="judgment-badge no">非対象</span>
+          <div class="judgment-reason">申込機器にナビなし</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 麻酔時間 -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">
+        <span class="chevron">▼</span> 麻酔時間（麻酔検査レポートより）
+      </div>
+      <div class="section-body" style="padding:0">
+        <table class="data-table">
+          <thead>
+            <tr><th>麻酔種別</th><th>コード</th><th>合計</th><th>時間帯</th><th>貼り付けコード</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>閉鎖循環式全身麻酔５（その他）</td>
+              <td class="code">492700</td>
+              <td class="num">12:52</td>
+              <td>08:38～21:30</td>
+              <td><span class="paste-code" onclick="copySingle(this)">492700+12:52,</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 薬剤コスト -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">
+        <span class="chevron">▼</span> 薬剤コスト（使用薬剤レポート・ORSYSより）
+        <span style="margin-left:auto; font-size:10px; color:var(--orange); font-weight:500">✎ 編集可能</span>
+      </div>
+      <div class="section-body" style="padding:0">
+        <table class="data-table" id="drugTable">
+          <thead>
+            <tr><th style="min-width:240px">薬品名</th><th>課金コード</th><th>使用量</th><th>単位</th><th>貼り付けコード</th></tr>
+          </thead>
+          <tbody>
+            <tr class="cat-row"><td colspan="5">■ 麻酔薬</td></tr>
+            <tr>
+              <td>酸素</td>
+              <td class="code">540000</td>
+              <td class="editable"><input type="text" value="599.4"></td>
+              <td>L</td>
+              <td><span class="paste-code" onclick="copySingle(this)">540000+599.4,</span></td>
+            </tr>
+            <tr>
+              <td>セボフルラン吸入麻酔液「VTRS」</td>
+              <td class="code">237594</td>
+              <td class="editable"><input type="text" value="148.44"></td>
+              <td>mL</td>
+              <td><span class="paste-code" onclick="copySingle(this)">237594+148.44,</span></td>
+            </tr>
+            <tr>
+              <td>局麻キシロカイン-Ｅ ▲1%（20mL/V）</td>
+              <td class="code">301221</td>
+              <td class="editable"><input type="text" value="10"></td>
+              <td>mlバイアル</td>
+              <td><span class="paste-code" onclick="copySingle(this)">301221+10,</span></td>
+            </tr>
+            <tr>
+              <td>ﾌﾟﾛﾎﾟﾌｫｰﾙ静注▲(200mg/20mL/A)</td>
+              <td class="code">341361</td>
+              <td class="editable"><input type="text" value="1"></td>
+              <td>Ａ</td>
+              <td><span class="paste-code" onclick="copySingle(this)">341361+1,</span></td>
+            </tr>
+            <tr>
+              <td>ﾌﾟﾛﾎﾟﾌｫｰﾙ静注▲(500㎎/50mL/V)</td>
+              <td class="code">341362</td>
+              <td class="editable"><input type="text" value="1"></td>
+              <td>Ｖ</td>
+              <td><span class="paste-code" onclick="copySingle(this)">341362+1,</span></td>
+            </tr>
+            <tr>
+              <td>麻－ﾚﾐﾌｪﾝﾀﾆﾙ静注用(2mg/V)</td>
+              <td class="code">341965</td>
+              <td class="editable"><input type="text" value="6"></td>
+              <td>Ｖ</td>
+              <td><span class="paste-code" onclick="copySingle(this)">341965+6,</span></td>
+            </tr>
+            <tr>
+              <td>ﾛｸﾛﾆｳﾑ臭化物静注液（50mg/5mL/V）</td>
+              <td class="code">342014</td>
+              <td class="editable"><input type="text" value="6"></td>
+              <td>Ｖ</td>
+              <td><span class="paste-code" onclick="copySingle(this)">342014+6,</span></td>
+            </tr>
+            <tr>
+              <td>麻－ﾌｪﾝﾀﾆﾙ注射液「ﾃﾙﾓ」▲(0.5mg/10mL/A)</td>
+              <td class="code">396090</td>
+              <td class="editable"><input type="text" value="2"></td>
+              <td>Ａ</td>
+              <td><span class="paste-code" onclick="copySingle(this)">396090+2,</span></td>
+            </tr>
+
+            <tr class="cat-row"><td colspan="5">■ 術後鎮痛薬</td></tr>
+            <tr>
+              <td>生理食塩液 ▲（50mL/本）</td>
+              <td class="code">302124</td>
+              <td class="editable"><input type="text" value="1"></td>
+              <td>瓶</td>
+              <td><span class="paste-code" onclick="copySingle(this)">/33+302124+1,</span></td>
+            </tr>
+            <tr>
+              <td>麻－ﾌｪﾝﾀﾆﾙ注射液「ﾃﾙﾓ」▲(0.5mg/10mL/A)</td>
+              <td class="code">396090</td>
+              <td class="editable"><input type="text" value="1"></td>
+              <td>Ａ</td>
+              <td><span class="paste-code" onclick="copySingle(this)">396090+1</span></td>
+            </tr>
+
+            <tr class="cat-row"><td colspan="5">■ 注射薬</td></tr>
+            <tr>
+              <td>(ｱﾗｰﾄ)ﾍﾊﾟﾘﾝNa注｢ＡＹ｣(1万単位/10mL/V)</td>
+              <td class="code">341091</td>
+              <td class="editable"><input type="text" value="1"></td>
+              <td>瓶</td>
+              <td><span class="paste-code" onclick="copySingle(this)">341091+1,</span></td>
+            </tr>
+            <tr>
+              <td>塩酸エフェドリン注（40mg/1mL/A）</td>
+              <td class="code">300704</td>
+              <td class="editable"><input type="text" value="1"></td>
+              <td>Ａ</td>
+              <td><span class="paste-code" onclick="copySingle(this)">300704+1,</span></td>
+            </tr>
+            <tr>
+              <td>生理食塩液 ▲（50mL/本）</td>
+              <td class="code">302124</td>
+              <td class="editable"><input type="text" value="1"></td>
+              <td>瓶</td>
+              <td><span class="paste-code" onclick="copySingle(this)">302124+1,</span></td>
+            </tr>
+            <tr>
+              <td>【V-左(手背)】ソルアセトＦ(500mL/袋）</td>
+              <td class="code">308469</td>
+              <td class="editable"><input type="text" value="5"></td>
+              <td>袋</td>
+              <td><span class="paste-code" onclick="copySingle(this)">308469+5,</span></td>
+            </tr>
+
+            <tr class="cat-row"><td colspan="5">■ その他薬剤</td></tr>
+            <tr>
+              <td>生食溶解液キットＨ ▲（100mL/本）</td>
+              <td class="code">302103</td>
+              <td class="editable"><input type="text" value="5"></td>
+              <td>本</td>
+              <td><span class="paste-code" onclick="copySingle(this)">302103+5,</span></td>
+            </tr>
+            <tr>
+              <td>スルバシリン静注用▲(1500mg/V)</td>
+              <td class="code">307772</td>
+              <td class="editable"><input type="text" value="5"></td>
+              <td>瓶</td>
+              <td><span class="paste-code" onclick="copySingle(this)">307772+5,</span></td>
+            </tr>
+            <tr>
+              <td>デキサート注射液▲６．６mg</td>
+              <td class="code">309688</td>
+              <td class="editable"><input type="text" value="1"></td>
+              <td>Ｖ</td>
+              <td><span class="paste-code" onclick="copySingle(this)">309688+1,</span></td>
+            </tr>
+            <tr>
+              <td>【V-右(前腕)】フィジオ１４０輸液▲(500mL/袋)</td>
+              <td class="code">309864</td>
+              <td class="editable"><input type="text" value="5"></td>
+              <td>袋</td>
+              <td><span class="paste-code" onclick="copySingle(this)">309864+5,</span></td>
+            </tr>
+            <tr>
+              <td>希釈・溶解用生理食塩水</td>
+              <td class="code">300911</td>
+              <td class="editable"><input type="text" value="123"></td>
+              <td>mL</td>
+              <td><span class="paste-code" onclick="copySingle(this)">300911+1,</span></td>
+            </tr>
+
+            <tr class="cat-row"><td colspan="5">■ Aライン</td></tr>
+            <tr>
+              <td>ラクトリンゲル</td>
+              <td class="code">304590</td>
+              <td class="num">1</td>
+              <td></td>
+              <td><span class="paste-code" onclick="copySingle(this)">304590+1,</span></td>
+            </tr>
+            <tr>
+              <td>ヘパNa</td>
+              <td class="code">341091</td>
+              <td class="num">0.15</td>
+              <td></td>
+              <td><span class="paste-code" onclick="copySingle(this)">341091+0.15,</span></td>
+            </tr>
+            <tr>
+              <td>ヘパロック</td>
+              <td class="code">307830</td>
+              <td class="num">1</td>
+              <td></td>
+              <td><span class="paste-code" onclick="copySingle(this)">307830+1,</span></td>
+            </tr>
+
+            <tr class="cat-row"><td colspan="5">■ ORSYSリマークスより抽出</td></tr>
+            <tr>
+              <td>1%Eキシロカイン</td>
+              <td class="code" style="color:var(--text-muted)">—</td>
+              <td class="num">20</td>
+              <td>ml</td>
+              <td style="color:var(--text-muted); font-size:11px">（コード未設定）</td>
+            </tr>
+            <tr>
+              <td>生食</td>
+              <td class="code" style="color:var(--text-muted)">—</td>
+              <td class="num">500</td>
+              <td>ml</td>
+              <td style="color:var(--text-muted); font-size:11px">（コード未設定）</td>
+            </tr>
+          </tbody>
+        </table>
+        <button class="add-row-btn" onclick="showToast('行追加ダイアログを表示（実装時）')">＋ 薬剤を追加</button>
+
+        <!-- Copy all bar -->
+        <div class="copy-bar">
+          <div class="preview">540000+599.4, 237594+148.44, 301221+10, 341361+1, ... (全22項目)</div>
+          <button class="btn-copy" onclick="copyAllCodes(this)">📋 全コードをコピー</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 検査 -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">
+        <span class="chevron">▼</span> 検査（麻酔検査レポートより）
+      </div>
+      <div class="section-body" style="padding:0">
+        <table class="data-table kensa-table">
+          <thead>
+            <tr><th>項目</th><th>コード</th><th>回数</th><th>単位</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>経皮的動脈血酸素飽和度監視</td><td class="code">670651</td><td></td><td></td></tr>
+            <tr><td>動脈ライン留置（インサイトA）</td><td class="code">500646</td><td></td><td></td></tr>
+            <tr><td>観血的動脈圧（１時間以上）</td><td class="code">670610</td><td></td><td></td></tr>
+            <tr><td>血液ガス</td><td class="code">673400</td><td class="num">6</td><td>回</td></tr>
+            <tr><td>血液一般</td><td class="code">622900</td><td class="num">6</td><td>回</td></tr>
+            <tr><td>グルコース</td><td class="code">651470</td><td class="num">6</td><td>回</td></tr>
+            <tr><td>イオン化Ca</td><td class="code">651750</td><td class="num">6</td><td>回</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Confirm -->
+    <div class="confirm-bar">
+      <div class="note">内容を確認後、「確定」ボタンを押してください。確定後も再編集が可能です。</div>
+      <button class="btn btn-outline btn-sm" onclick="exportExcel()">⬇ Excel出力</button>
+      <button class="btn btn-primary btn-sm" onclick="confirmSheet()">✓ 確定</button>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── Sidebar toggle ──
+  function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebarOverlay').classList.toggle('show');
+  }
+
+  // ── Patient selection ──
+  function selectPatient(el) {
+    document.querySelectorAll('.patient-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    // モバイルではサイドバーを閉じる
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('show');
+    showToast('患者を切り替えました');
+  }
+
+  // ── Section toggle ──
+  function toggleSection(el) {
+    const body = el.nextElementSibling;
+    const chevron = el.querySelector('.chevron');
+    if (body.style.display === 'none') {
+      body.style.display = '';
+      chevron.textContent = '▼';
+    } else {
+      body.style.display = 'none';
+      chevron.textContent = '▶';
+    }
+  }
+
+  // ── Copy single code ──
+  function copySingle(el) {
+    const text = el.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      el.style.background = '#D1FAE5';
+      el.style.borderColor = '#10B981';
+      setTimeout(() => {
+        el.style.background = '';
+        el.style.borderColor = '';
+      }, 600);
+      showToast('コピー: ' + text);
+    });
+  }
+
+  // ── Copy all codes ──
+  function copyAllCodes(btn) {
+    const codes = [];
+    document.querySelectorAll('#drugTable .paste-code').forEach(el => {
+      codes.push(el.textContent);
+    });
+    // 麻酔時間のコードも含める
+    const allText = codes.join('\n');
+    navigator.clipboard.writeText(allText).then(() => {
+      btn.textContent = '✓ コピーしました';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = '📋 全コードをコピー';
+        btn.classList.remove('copied');
+      }, 1500);
+    });
+  }
+
+  // ── Pipeline simulation ──
+  function runPipeline() {
+    const status = document.getElementById('pipelineStatus');
+    status.className = 'pipeline-status running';
+    status.innerHTML = '<span class="status-dot running"></span><span>実行中 — Bronze → Silver → Gold...</span>';
+    setTimeout(() => {
+      status.className = 'pipeline-status done';
+      status.innerHTML = '<span class="status-dot"></span><span>完了 — 5件処理済み（12秒）</span>';
+      showToast('パイプライン完了');
+    }, 2000);
+  }
+
+  // ── Actions ──
+  function exportExcel() { showToast('Excelファイルをダウンロード（実装時）'); }
+  function confirmSheet() { showToast('✓ テスト太郎の算定を確定しました'); }
+
+  // ── Toast ──
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+  }
+</script>
+
+</body>
+</html>
