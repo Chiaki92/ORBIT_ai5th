@@ -7,6 +7,9 @@ UIモック準拠レイアウト:
 """
 
 import os
+from io import BytesIO
+
+import pandas as pd
 import streamlit as st
 
 # --- データ読み込みモジュール ---
@@ -26,8 +29,10 @@ from views.page_source_viewer import render_source_viewer
 
 # --- Fabric接続モジュール ---
 from fabric_connection import (
+    download_file_from_onelake,
     is_fabric_available,
     upload_file_to_onelake,
+    trigger_pipeline,
     trigger_notebook,
     trigger_dataflow,
     wait_for_job,
@@ -223,6 +228,22 @@ def _status_badge_html(status_text: str) -> str:
     return f'<span class="badge {css_class}">{label}</span>'
 
 
+@st.cache_data
+def _load_orbit_workbook_from_export(filename: str = "ORBIT_算定シート.xlsx"):
+    """
+    Lakehouse Files/export 配下の算定シートを読み込み、全シートDataFrameを返す。
+    """
+    file_bytes = download_file_from_onelake(filename=filename, subfolder="", folder="export")
+    if file_bytes is None:
+        return None, {}
+
+    try:
+        sheets = pd.read_excel(BytesIO(file_bytes), sheet_name=None, engine="openpyxl")
+        return file_bytes, sheets
+    except Exception:
+        return file_bytes, {}
+
+
 # =============================================================================
 # サイドバー
 # =============================================================================
@@ -311,6 +332,17 @@ with st.sidebar:
         else:
             with st.status("パイプラインを実行中...", expanded=True) as status:
                 try:
+                    pipeline_id = os.environ.get("FABRIC_PIPELINE_ID", "").strip()
+                    if pipeline_id:
+                        st.write("▶ Fabric Pipeline を開始...")
+                        loc = trigger_pipeline(pipeline_id)
+                        wait_for_job(loc)
+                        st.write("✅ Fabric Pipeline 完了")
+                        status.update(label="パイプライン完了", state="complete")
+                        st.session_state["pipeline_status"] = "done"
+                        st.cache_data.clear()
+                        st.rerun()
+
                     steps = [
                         ("NOTEBOOK_YAKUZAI_ID", "使用薬剤Notebook", trigger_notebook),
                         ("NOTEBOOK_MASUI_KENSA_ID", "麻酔検査Notebook", trigger_notebook),
@@ -323,9 +355,27 @@ with st.sidebar:
                             st.write(f"⏭️ {label} — スキップ（{env_key} 未設定）")
                             continue
                         st.write(f"▶ {label} を開始...")
-                        loc = trigger_fn(item_id)
-                        wait_for_job(loc)
-                        st.write(f"✅ {label} 完了")
+                        try:
+                            loc = trigger_fn(item_id)
+                            wait_for_job(loc)
+                            st.write(f"✅ {label} 完了")
+                        except Exception as step_error:
+                            msg = str(step_error)
+                            # Notebook をサービスプリンシパルで呼んだときの既知制約:
+                            # UserAccessTokenException はUI手動実行で代替可能なため、全体は継続する
+                            if (
+                                trigger_fn is trigger_notebook
+                                and (
+                                    "UserAccessTokenException" in msg
+                                    or "unable to acquire user token" in msg
+                                )
+                            ):
+                                st.warning(
+                                    f"⚠️ {label} はAPI実行をスキップしました（ユーザートークン要件）。"
+                                    "Fabric UIでの手動実行結果を利用して続行します。"
+                                )
+                                continue
+                            raise
 
                     status.update(label="パイプライン完了", state="complete")
                     st.session_state["pipeline_status"] = "done"
@@ -420,3 +470,21 @@ render_detail(
     exam_items_df=exam_items_df,
     drug_items_df=drug_items_df,
 )
+
+
+# =============================================================================
+# ORBIT算定シート（Excel）全内容表示
+# =============================================================================
+with st.expander("📘 ORBIT_算定シート.xlsx（Files/export）全内容", expanded=True):
+    wb_bytes, wb_sheets = _load_orbit_workbook_from_export()
+
+    if wb_bytes is None:
+        st.error("`Files/export/ORBIT_算定シート.xlsx` を取得できませんでした。")
+    elif not wb_sheets:
+        st.error("Excelは取得できましたが、シートの読み込みに失敗しました。")
+    else:
+        st.caption(f"シート数: {len(wb_sheets)}")
+        for sheet_name, sheet_df in wb_sheets.items():
+            st.markdown(f"### {sheet_name}")
+            st.caption(f"{len(sheet_df)}行 × {len(sheet_df.columns)}列")
+            st.dataframe(sheet_df, width="stretch", height=420)

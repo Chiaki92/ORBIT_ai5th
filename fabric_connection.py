@@ -287,17 +287,17 @@ def upload_file_to_onelake(file_bytes: bytes, filename: str, subfolder: str) -> 
     return True
 
 
-def download_file_from_onelake(filename: str, subfolder: str) -> bytes | None:
+def download_file_from_onelake(filename: str, subfolder: str, folder: str = "raw") -> bytes | None:
     """
-    Fabric LakehouseのFiles/raw/{subfolder}/{filename}からファイルをダウンロードする。
+    Fabric LakehouseのFiles/{folder}/{subfolder}/{filename}からファイルをダウンロードする。
 
     元データ確認機能で使用。アップロード済みのPDF/CSVを取得して
     ブラウザ上で表示するために使う。
 
     引数:
       filename:   ファイル名（例: "report.pdf"）
-      subfolder:  rawフォルダ内のサブフォルダ名
-                  "yakuzai" / "masui_kensa" / "orsys" / "karte_kiji"
+      subfolder:  folder配下のサブフォルダ名（未指定可）
+      folder:     Files配下のフォルダ名（既定: "raw"）
 
     戻り値:
       ファイルの内容（バイト列）。取得に失敗した場合はNone。
@@ -312,7 +312,11 @@ def download_file_from_onelake(filename: str, subfolder: str) -> bytes | None:
     token = get_storage_token()
 
     base_url = "https://onelake.dfs.fabric.microsoft.com"
-    path = f"/{workspace_id}/{lakehouse_id}/Files/raw/{subfolder}/{filename}"
+    normalized_folder = str(folder or "").strip().strip("/")
+    normalized_subfolder = str(subfolder or "").strip().strip("/")
+    path_parts = [p for p in (normalized_folder, normalized_subfolder) if p]
+    joined_path = "/".join(path_parts)
+    path = f"/{workspace_id}/{lakehouse_id}/Files/{joined_path}/{filename}"
     url = f"{base_url}{path}"
 
     headers = {"Authorization": f"Bearer {token}"}
@@ -320,11 +324,11 @@ def download_file_from_onelake(filename: str, subfolder: str) -> bytes | None:
     try:
         resp = requests.get(url, headers=headers)
         if resp.status_code == 200:
-            logger.info(f"OneLakeからダウンロード完了: raw/{subfolder}/{filename} ({len(resp.content):,} bytes)")
+            logger.info(f"OneLakeからダウンロード完了: {joined_path}/{filename} ({len(resp.content):,} bytes)")
             return resp.content
         else:
             logger.warning(
-                f"OneLakeからのダウンロードに失敗: raw/{subfolder}/{filename} "
+                f"OneLakeからのダウンロードに失敗: {joined_path}/{filename} "
                 f"ステータス {resp.status_code}"
             )
             return None
@@ -395,8 +399,44 @@ def trigger_notebook(notebook_id: str, parameters: dict | None = None) -> str:
 
 
 # =============================================================================
-# Dataflow Gen2実行トリガー
+# Pipeline / Dataflow 実行トリガー
 # =============================================================================
+
+def trigger_pipeline(pipeline_id: str) -> str:
+    """
+    Fabric Pipeline の実行をトリガーする（非同期実行）。
+
+    引数:
+      pipeline_id: 実行するPipelineのID（GUID文字列）
+
+    戻り値:
+      ジョブ監視用のURL（Locationヘッダーの値）
+    """
+    workspace_id = _get_env_or_raise("FABRIC_WORKSPACE_ID")
+    token = get_fabric_api_token()
+
+    # Fabric Pipeline は jobType=Pipeline で実行
+    url = (
+        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
+        f"/items/{pipeline_id}/jobs/instances?jobType=Pipeline"
+    )
+
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.post(url, headers=headers)
+    if resp.status_code != 202:
+        raise RuntimeError(
+            f"Pipeline実行のトリガーに失敗しました（ID: {pipeline_id}）: "
+            f"ステータス {resp.status_code}, {resp.text}"
+        )
+
+    location = resp.headers.get("Location")
+    if not location:
+        raise RuntimeError(
+            f"Pipeline実行のレスポンスにLocationヘッダーがありません（ID: {pipeline_id}）"
+        )
+
+    logger.info(f"Pipeline実行をトリガーしました: {pipeline_id}")
+    return location
 
 def trigger_dataflow(dataflow_id: str) -> str:
     """
@@ -419,9 +459,10 @@ def trigger_dataflow(dataflow_id: str) -> str:
     token = get_fabric_api_token()
 
     # Fabric REST APIのDataflow実行エンドポイント
+    # Dataflow Gen2 は jobType=Refresh で実行する
     url = (
         f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
-        f"/items/{dataflow_id}/jobs/instances?jobType=Pipeline"
+        f"/items/{dataflow_id}/jobs/instances?jobType=Refresh"
     )
 
     headers = {"Authorization": f"Bearer {token}"}
@@ -500,8 +541,22 @@ def wait_for_job(job_location_url: str, timeout_seconds: int = 300) -> bool:
 
         # 失敗またはキャンセルされた場合
         if status in ("Failed", "Cancelled"):
-            error_msg = data.get("failureReason", {}).get("message", "詳細不明")
-            raise RuntimeError(f"ジョブが{status}になりました: {error_msg}")
+            failure_reason = data.get("failureReason", {}) or {}
+            error_code = failure_reason.get("errorCode", "")
+            error_msg = failure_reason.get("message", "詳細不明")
+
+            # Notebook をサービスプリンシパルで起動した際に起こりやすい既知エラー
+            if error_code == "UserAccessTokenException":
+                raise RuntimeError(
+                    "ジョブがFailedになりました: Job failed to start: unable to acquire user token\n"
+                    "Notebook実行はユーザー委任トークンを要求しています。"
+                    "現在のサービスプリンシパル認証では起動できません。\n"
+                    "対応案: 1) Fabric UIからNotebookを手動実行する "
+                    "2) ユーザー委任トークンでAPIを呼ぶ "
+                    "3) Notebook実行をパイプライン/別経路に移す"
+                )
+
+            raise RuntimeError(f"ジョブが{status}になりました: [{error_code}] {error_msg}")
 
         # まだ実行中の場合は5秒待ってから再チェック
         time.sleep(5)
