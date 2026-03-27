@@ -12,6 +12,7 @@ def kubun_section_label(kubun: str) -> str:
         "検査": "検査",
         "薬剤": "薬剤",
         "薬剤（術後鎮痛）": "術後鎮痛薬",
+        "Aライン": "Aライン",
         "★項目": "★項目",
         "ナビ": "ナビゲーション",
     }
@@ -51,7 +52,8 @@ def paste_code_line(row: dict) -> str:
     qty = str(row.get("現在値", "") or "").strip()
     if not code and not qty:
         return "—"
-    if kubun == "薬剤（術後鎮痛）":
+    # 術後鎮痛薬カテゴリの先頭行は /33+ プレフィックス
+    if kubun == "薬剤（術後鎮痛）" and row.get("_is_first_postop", False):
         return f"/33+{code}+{qty},"
     return f"{code}+{qty},"
 

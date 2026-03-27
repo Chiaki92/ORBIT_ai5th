@@ -122,6 +122,8 @@ def build_box1(
     navi_df: pd.DataFrame | None = None,
     surgery_date: str | None = None,
     masui_time_raw_df: pd.DataFrame | None = None,
+    aline_master: pd.DataFrame | None = None,
+    aline_flag: bool = False,
 ) -> list:
     """
     ルール適用後のデータを統一フォーマット（箱1）に変換する。
@@ -205,10 +207,13 @@ def build_box1(
         seishoku = ""
         if "生食課金コード" in row.index and pd.notna(row.get("生食課金コード")):
             seishoku = str(row["生食課金コード"]).strip()
+        # 元の薬剤カテゴリを保持（表示のグループ化に使用）
+        drug_cat = str(row.get("カテゴリ", "")) if "カテゴリ" in row.index else ""
         src = _build_source_entry(row, "使用薬剤レポート(PDF)", "yakuzai")
         rows.append({
             "row_id": f"drug_{counter:03d}",
             "区分": "薬剤",
+            "薬剤カテゴリ": drug_cat,
             "項目名": row["名称"],
             "コード": str(row["コード"]),
             "数量": str(row["請求量"]),
@@ -224,10 +229,12 @@ def build_box1(
         seishoku = ""
         if "生食課金コード" in row.index and pd.notna(row.get("生食課金コード")):
             seishoku = str(row["生食課金コード"]).strip()
+        drug_cat = str(row.get("カテゴリ", "術後鎮痛薬")) if "カテゴリ" in row.index else "術後鎮痛薬"
         src = _build_source_entry(row, "使用薬剤レポート(PDF)", "yakuzai")
         rows.append({
             "row_id": f"drug_{counter:03d}",
             "区分": "薬剤（術後鎮痛）",
+            "薬剤カテゴリ": drug_cat,
             "項目名": row["名称"],
             "コード": str(row["コード"]),
             "数量": str(row["請求量"]),
@@ -236,6 +243,21 @@ def build_box1(
             "_sources": [src] if src else [],
         })
         counter += 1
+
+    # --- Aライン薬剤（Aライン判定が「あり」の場合のみ追加） ---
+    if aline_flag and aline_master is not None and not aline_master.empty:
+        for idx, (_, arow) in enumerate(aline_master.iterrows(), start=1):
+            rows.append({
+                "row_id": f"aline_{idx:03d}",
+                "区分": "Aライン",
+                "薬剤カテゴリ": "Aライン",
+                "項目名": str(arow["薬剤名"]),
+                "コード": str(arow["課金コード"]),
+                "数量": str(arow["使用量"]),
+                "単位": "",
+                "生食課金コード": "",
+                "_sources": [],
+            })
 
     # --- ★項目（術後鎮痛薬の後に追加） ---
     if star_items_df is not None and not star_items_df.empty:
